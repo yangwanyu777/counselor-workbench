@@ -6,6 +6,8 @@
 const state = {
   currentModule: 'dashboard',
   students: [],
+  filteredStudents: [],
+  selectedStudentIds: new Set(),
   grades: [],
   assessments: [],
   currentPage: 1,
@@ -109,13 +111,8 @@ function detectFieldType(key, values) {
 // 从列名推断字段key
 function columnToFieldKey(columnName) {
   const lower = String(columnName).trim();
-  // 直接查找映射
-  for (const [key, names] of Object.entries(FIELD_NAME_MAP)) {
-    if (typeof names === 'string') {
-      if (lower === names || lower.includes(names)) return key;
-    }
-  }
-  // 常见列名规则化
+
+  // 1. 先检查精确规则匹配（最具体，如"父亲联系方式"优先于"联系方式"）
   const rules = [
     [/^(学号|考号|编号|学籍号)$/, 'studentId'],
     [/^(姓名|学生姓名|名字)$/, 'name'],
@@ -126,9 +123,9 @@ function columnToFieldKey(columnName) {
     [/^(年级|入学年份|届)$/, 'year'],
     [/^(专业|专业名称)$/, 'major'],
     [/^(班级|行政班|教学班)$/, 'className'],
-    [/^(手机|电话|联系方式|手机号|联系电话)$/, 'phone'],
+    [/^(手机|电话|联系方式|手机号|联系电话|本人电话|本人联系方式|本人手机)$/, 'phone'],
     [/^(家庭住址|住址|地址|家庭地址|现住址)$/, 'address'],
-    [/^(生涯规划|生涯目标|规划目标|职业规划|毕业意向)$/, 'careerGoal'],
+    [/^(生涯规划|生涯目标|规划目标|职业规划|毕业意向|生涯规划信息|生涯规划目标)$/, 'careerGoal'],
     [/^(政治面貌|党派)$/, 'politicalStatus'],
     [/^(身份证号|身份证|证件号)$/, 'idCard'],
     [/^(邮箱|电子邮箱|邮件)$/, 'email'],
@@ -139,12 +136,12 @@ function columnToFieldKey(columnName) {
     [/^(入学日期|入学时间)$/, 'enrollmentDate'],
     [/^(预计毕业|毕业日期|离校时间)$/, 'graduationDate'],
     [/^(毕业中学|高中)$/, 'highSchool'],
-    [/^(父亲联系方式|父亲电话|父亲手机|爸爸联系方式)$/, 'fatherPhone'],
-    [/^(母亲联系方式|母亲电话|母亲手机|妈妈联系方式)$/, 'motherPhone'],
+    [/^(父亲联系方式|父亲电话|父亲手机|父亲手机号|父亲联系电话|爸爸联系方式|爸爸电话|爸爸手机)$/, 'fatherPhone'],
+    [/^(母亲联系方式|母亲电话|母亲手机|母亲手机号|母亲联系电话|妈妈联系方式|妈妈电话|妈妈手机)$/, 'motherPhone'],
     [/^(父亲姓名|父亲名字|爸爸姓名)$/, 'fatherName'],
     [/^(母亲姓名|母亲名字|妈妈姓名)$/, 'motherName'],
     [/^(家长姓名|监护人姓名)$/, 'parentName'],
-    [/^(家长电话|家长联系方式|家长手机)$/, 'parentPhone'],
+    [/^(家长电话|家长联系方式|家长手机|监护人电话)$/, 'parentPhone'],
     [/^(紧急联系人|紧急联系人姓名)$/, 'emergencyContact'],
     [/^(紧急联系电话|紧急电话)$/, 'emergencyPhone'],
     [/^(学籍状态|在读状态|状态)$/, 'studentStatus'],
@@ -153,7 +150,18 @@ function columnToFieldKey(columnName) {
   for (const [regex, key] of rules) {
     if (regex.test(lower)) return key;
   }
-  // 未知列名：使用安全的英文字段key（避免中文key导致的问题）
+
+  // 2. 再检查 FIELD_NAME_MAP 精确匹配
+  for (const [key, names] of Object.entries(FIELD_NAME_MAP)) {
+    if (typeof names === 'string' && lower === names) return key;
+  }
+
+  // 3. 最后检查 FIELD_NAME_MAP 模糊匹配（includes）
+  for (const [key, names] of Object.entries(FIELD_NAME_MAP)) {
+    if (typeof names === 'string' && names.length >= 3 && lower.includes(names)) return key;
+  }
+
+  // 4. 未知列名：使用安全的自定义 key
   return 'custom_' + lower.replace(/[^\u4e00-\u9fa5a-zA-Z0-9_]/g, '_').replace(/_+/g, '_').replace(/^_|_$/g, '').substring(0, 50);
 }
 
@@ -170,16 +178,16 @@ async function loadStudentFieldConfig() {
   const savedColumns = await getSetting('studentListColumns');
   const configVersion = await getSetting('fieldConfigVersion');
 
-  // V2 迁移：清除旧的字段配置，让 syncStudentFields 重新识别所有字段并自动显示
-  // 这样之前导入但未显示的字段（如父亲联系方式、母亲联系方式等）会自动出现在表格中
-  if (!configVersion || configVersion < 2) {
+  // V3 迁移：清除旧的字段配置，让 syncStudentFields 重新识别所有字段并自动显示
+  // V2 仍有 bug（父亲/母亲联系方式映射错误、字段管理器添加失效），V3 彻底修复
+  if (!configVersion || configVersion < 3) {
     state.studentFields = [];
     state.studentListColumns = [];
-    await setSetting('fieldConfigVersion', 2);
+    await setSetting('fieldConfigVersion', 3);
     await saveStudentFieldConfig();
   } else {
     state.studentFields = savedFields || [];
-    state.studentListColumns = savedColumns || DEFAULT_LIST_COLUMNS;
+    state.studentListColumns = savedColumns || [];
   }
 }
 
@@ -815,7 +823,7 @@ function renderStudentList(container) {
     return uniqueValues.length > 0 && uniqueValues.length <= 50;
   });
 
-  // 最多显示6个筛选器，优先显示默认常用字段
+  // 最多显示8个筛选器，优先显示默认常用字段
   const priority = ['year', 'major', 'className', 'careerGoal', 'ethnicity', 'gradeLevel'];
   filterableFields.sort((a, b) => {
     const pa = priority.indexOf(a.key);
@@ -834,7 +842,8 @@ function renderStudentList(container) {
           <button class="btn btn-primary" onclick="triggerStudentImport()">📥 导入Excel</button>
           <button class="btn btn-outline" onclick="showAddStudentForm()">➕ 手动添加</button>
           <button class="btn btn-outline" onclick="showFieldManager()">⚙️ 调整字段</button>
-          <button class="btn btn-outline" onclick="exportStudentsList()">📤 导出列表</button>
+          <button class="btn btn-outline" onclick="exportStudentsList()">📤 导出全部</button>
+          <button class="btn btn-outline" onclick="exportSelectedStudents()" id="exportSelectedBtn" style="display:none">📤 导出选中</button>
         </div>
         <div>
           <div class="card-title">学生数据管理</div>
@@ -859,6 +868,7 @@ function renderStudentList(container) {
         <table class="data-table" id="studentTable">
           <thead>
             <tr>
+              <th style="width:36px"><input type="checkbox" id="selectAllCheckbox" onchange="toggleSelectAll(this)"></th>
               ${columns.map(c => `<th>${getFieldDisplayName(c)}</th>`).join('')}
               <th>操作</th>
             </tr>
@@ -893,7 +903,7 @@ function applyStudentFilter() {
     if (value) filterConditions[field] = value;
   });
 
-  let filtered = state.students.filter(s => {
+  state.filteredStudents = state.students.filter(s => {
     if (search && !(s.name?.toLowerCase().includes(search) || s.studentId?.includes(search))) return false;
     for (const [field, value] of Object.entries(filterConditions)) {
       if (String(s[field] || '') !== value) return false;
@@ -902,7 +912,7 @@ function applyStudentFilter() {
   });
 
   state.currentPage = 1;
-  renderStudentTable(filtered);
+  renderStudentTable(state.filteredStudents);
 }
 
 function renderStudentTable(students) {
@@ -915,34 +925,81 @@ function renderStudentTable(students) {
   const totalPages = Math.ceil(students.length / state.pageSize);
 
   if (students.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="${columns.length + 1}"><div class="empty-state">
+    tbody.innerHTML = `<tr><td colspan="${columns.length + 2}"><div class="empty-state">
       <div class="empty-icon">📋</div>
       <div class="empty-text">暂无学生数据，请点击「导入Excel」或「手动添加」</div>
     </div></td></tr>`;
   } else {
-    tbody.innerHTML = pageData.map(s => `
-      <tr class="row-clickable" onclick="showStudentDetail(${s.id})">
-        ${columns.map(c => `<td>${renderCellValue(c, s[c])}</td>`).join('')}
+    tbody.innerHTML = pageData.map(s => {
+      const checked = state.selectedStudentIds.has(s.id) ? 'checked' : '';
+      return `
+      <tr class="row-clickable">
+        <td onclick="event.stopPropagation()"><input type="checkbox" class="row-checkbox" data-id="${s.id}" onchange="toggleSelectStudent(${s.id}, this)" ${checked}></td>
+        ${columns.map(c => `<td onclick="showStudentDetail(${s.id})">${renderCellValue(c, s[c])}</td>`).join('')}
         <td onclick="event.stopPropagation()">
           <button class="btn btn-sm btn-outline" onclick="showEditStudentForm(${s.id})">编辑</button>
           <button class="btn btn-sm btn-danger" onclick="deleteStudentConfirm(${s.id})">删除</button>
         </td>
-      </tr>`).join('');
+      </tr>`;
+    }).join('');
   }
 
-  // 分页
+  // 更新全选复选框状态
+  const selectAllCb = document.getElementById('selectAllCheckbox');
+  if (selectAllCb) {
+    const pageIds = pageData.map(s => s.id);
+    const allChecked = pageIds.length > 0 && pageIds.every(id => state.selectedStudentIds.has(id));
+    selectAllCb.checked = allChecked;
+  }
+
+  // 更新导出选中按钮显示
+  updateExportSelectedBtn();
+
+  // 分页（带跳页功能）
   const pagEl = document.getElementById('studentPagination');
   if (totalPages > 1) {
     let html = '';
     html += `<button onclick="changeStudentPage(${state.currentPage - 1})" ${state.currentPage <= 1 ? 'disabled' : ''}>上一页</button>`;
-    for (let i = 1; i <= totalPages && i <= 10; i++) {
+
+    // 智能页码显示：最多显示7个页码按钮
+    const maxButtons = 7;
+    let startPage = 1, endPage = totalPages;
+    if (totalPages > maxButtons) {
+      const half = Math.floor(maxButtons / 2);
+      startPage = Math.max(1, state.currentPage - half);
+      endPage = Math.min(totalPages, startPage + maxButtons - 1);
+      if (endPage - startPage < maxButtons - 1) {
+        startPage = Math.max(1, endPage - maxButtons + 1);
+      }
+    }
+
+    if (startPage > 1) {
+      html += `<button class="1 === state.currentPage ? 'active' : ''" onclick="changeStudentPage(1)">1</button>`;
+      if (startPage > 2) html += `<span style="padding:0 4px;color:var(--text-muted)">…</span>`;
+    }
+
+    for (let i = startPage; i <= endPage; i++) {
       html += `<button class="${i === state.currentPage ? 'active' : ''}" onclick="changeStudentPage(${i})">${i}</button>`;
     }
+
+    if (endPage < totalPages) {
+      if (endPage < totalPages - 1) html += `<span style="padding:0 4px;color:var(--text-muted)">…</span>`;
+      html += `<button class="${totalPages === state.currentPage ? 'active' : ''}" onclick="changeStudentPage(${totalPages})">${totalPages}</button>`;
+    }
+
     html += `<button onclick="changeStudentPage(${state.currentPage + 1})" ${state.currentPage >= totalPages ? 'disabled' : ''}>下一页</button>`;
+    // 跳页输入框
+    html += `<span style="margin-left:8px;display:inline-flex;align-items:center;gap:4px;font-size:13px;color:var(--text-muted)">第<input type="number" min="1" max="${totalPages}" value="${state.currentPage}" style="width:50px;padding:2px 4px;border:1px solid var(--border);border-radius:4px;text-align:center" onchange="jumpToPage(this.value, ${totalPages})">页/共${totalPages}页</span>`;
     pagEl.innerHTML = html;
   } else {
     pagEl.innerHTML = '';
   }
+}
+
+function jumpToPage(value, totalPages) {
+  const page = parseInt(value);
+  if (isNaN(page) || page < 1 || page > totalPages) return;
+  changeStudentPage(page);
 }
 
 function renderCellValue(fieldKey, value) {
@@ -957,8 +1014,8 @@ function renderCellValue(fieldKey, value) {
 
 function changeStudentPage(page) {
   state.currentPage = page;
-  // Re-apply filter
-  applyStudentFilter();
+  // 直接渲染表格，不重新筛选（避免重置页码）
+  renderStudentTable(state.filteredStudents);
 }
 
 // Excel 导入
@@ -1411,7 +1468,7 @@ function calcWeightedAvg(courses) {
   return totalCredit > 0 ? totalScore / totalCredit : null;
 }
 
-// 导出学生列表
+// 导出学生列表（全部）
 async function exportStudentsList() {
   const students = state.students;
   if (students.length === 0) { showToast('暂无数据可导出', 'error'); return; }
@@ -1430,7 +1487,74 @@ async function exportStudentsList() {
   });
 
   exportToExcel(data, `学生列表_${formatDate(new Date())}.xlsx`, '学生列表');
-  showToast('已导出', 'success');
+  showToast(`已导出全部 ${students.length} 条数据`, 'success');
+}
+
+// 导出选中的学生
+async function exportSelectedStudents() {
+  if (state.selectedStudentIds.size === 0) { showToast('请先勾选要导出的学生', 'error'); return; }
+
+  const selectedStudents = state.students.filter(s => state.selectedStudentIds.has(s.id));
+  if (selectedStudents.length === 0) { showToast('未找到选中的学生数据', 'error'); return; }
+
+  // 收集所有字段（按字段配置顺序）
+  const fieldKeys = ['studentId', 'name', ...state.studentFields.map(f => f.key).filter(k => !SYSTEM_FIELDS.includes(k))];
+  const uniqueKeys = [];
+  fieldKeys.forEach(k => { if (!uniqueKeys.includes(k)) uniqueKeys.push(k); });
+
+  const data = selectedStudents.map(s => {
+    const row = {};
+    uniqueKeys.forEach(key => {
+      row[getFieldDisplayName(key)] = s[key] || '';
+    });
+    return row;
+  });
+
+  exportToExcel(data, `选中学生_${formatDate(new Date())}.xlsx`, '选中学生');
+  showToast(`已导出选中的 ${selectedStudents.length} 条数据`, 'success');
+}
+
+// 全选/取消全选（当前页）
+function toggleSelectAll(checkbox) {
+  const start = (state.currentPage - 1) * state.pageSize;
+  const pageData = state.filteredStudents.slice(start, start + state.pageSize);
+  if (checkbox.checked) {
+    pageData.forEach(s => state.selectedStudentIds.add(s.id));
+  } else {
+    pageData.forEach(s => state.selectedStudentIds.delete(s.id));
+  }
+  // 重新渲染表格以更新勾选状态
+  renderStudentTable(state.filteredStudents);
+}
+
+// 单个选择/取消选择
+function toggleSelectStudent(id, checkbox) {
+  if (checkbox.checked) {
+    state.selectedStudentIds.add(id);
+  } else {
+    state.selectedStudentIds.delete(id);
+  }
+  updateExportSelectedBtn();
+  // 更新全选复选框
+  const selectAllCb = document.getElementById('selectAllCheckbox');
+  if (selectAllCb) {
+    const start = (state.currentPage - 1) * state.pageSize;
+    const pageData = state.filteredStudents.slice(start, start + state.pageSize);
+    const allChecked = pageData.length > 0 && pageData.every(s => state.selectedStudentIds.has(s.id));
+    selectAllCb.checked = allChecked;
+  }
+}
+
+// 更新导出选中按钮显示状态
+function updateExportSelectedBtn() {
+  const btn = document.getElementById('exportSelectedBtn');
+  if (!btn) return;
+  if (state.selectedStudentIds.size > 0) {
+    btn.style.display = '';
+    btn.textContent = `📤 导出选中(${state.selectedStudentIds.size})`;
+  } else {
+    btn.style.display = 'none';
+  }
 }
 
 // ---------- 字段管理器 ----------
@@ -1532,7 +1656,7 @@ function moveField(index, direction) {
   state.studentFields[newIndex] = temp;
   // 重新渲染管理器
   const allFields = [...state.studentFields];
-  document.getElementById('fieldManagerBody').innerHTML = allFields.map((f, i) => renderFieldManagerRow(f, i, ['studentId', 'name'])).join('');
+  document.getElementById('fieldManagerBody').innerHTML = allFields.map((f, i) => renderFieldManagerRow(f, i, CORE_FIELDS)).join('');
 }
 
 function addCustomField() {
@@ -1541,17 +1665,19 @@ function addCustomField() {
   if (!name) { showToast('请输入字段名称', 'error'); return; }
 
   const key = columnToFieldKey(name);
+
+  // 先保存当前勾选状态（在修改任何东西之前）
+  saveCheckboxStateBeforeRerender();
+
   const existingField = state.studentFields.find(f => f.key === key);
   if (existingField) {
-    // 字段已存在：自动勾选「列表显示」并提示用户
+    // 字段已存在：自动开启列表显示
     if (!state.studentListColumns.includes(key)) {
       state.studentListColumns.push(key);
     }
     input.value = '';
-    // 保存当前勾选状态后重新渲染
-    saveCheckboxStateBeforeRerender();
     const allFields = [...state.studentFields];
-    document.getElementById('fieldManagerBody').innerHTML = allFields.map((f, i) => renderFieldManagerRow(f, i, ['studentId', 'name'])).join('');
+    document.getElementById('fieldManagerBody').innerHTML = allFields.map((f, i) => renderFieldManagerRow(f, i, CORE_FIELDS)).join('');
     showToast(`字段「${existingField.name}」已存在，已自动开启列表显示`, 'success');
     return;
   }
@@ -1570,9 +1696,8 @@ function addCustomField() {
   }
 
   input.value = '';
-  saveCheckboxStateBeforeRerender();
   const allFields = [...state.studentFields];
-  document.getElementById('fieldManagerBody').innerHTML = allFields.map((f, i) => renderFieldManagerRow(f, i, ['studentId', 'name'])).join('');
+  document.getElementById('fieldManagerBody').innerHTML = allFields.map((f, i) => renderFieldManagerRow(f, i, CORE_FIELDS)).join('');
   showToast(`字段「${name}」已添加`, 'success');
 }
 
@@ -1583,7 +1708,7 @@ function deleteField(key) {
   state.studentFields = state.studentFields.filter(f => f.key !== key);
   state.studentListColumns = state.studentListColumns.filter(c => c !== key);
   const allFields = [...state.studentFields];
-  document.getElementById('fieldManagerBody').innerHTML = allFields.map((f, i) => renderFieldManagerRow(f, i, ['studentId', 'name'])).join('');
+  document.getElementById('fieldManagerBody').innerHTML = allFields.map((f, i) => renderFieldManagerRow(f, i, CORE_FIELDS)).join('');
 }
 
 async function saveFieldManager() {
@@ -1591,7 +1716,7 @@ async function saveFieldManager() {
   document.querySelectorAll('.field-name-input').forEach(input => {
     const key = input.dataset.key;
     const field = state.studentFields.find(f => f.key === key);
-    if (field && !['studentId', 'name'].includes(key)) {
+    if (field && !CORE_FIELDS.includes(key)) {
       field.name = input.value.trim() || field.name;
     }
   });
