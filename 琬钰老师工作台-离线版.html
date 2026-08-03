@@ -1877,8 +1877,11 @@ const state = {
 
 // ========== 动态字段系统配置 ==========
 
-// 核心固定字段（不参与自定义管理）
-const SYSTEM_FIELDS = ['id', 'studentId', 'name', 'createdAt', 'updatedAt'];
+// 核心固定字段（不能删除/重命名，但可以显示/隐藏）
+const CORE_FIELDS = ['studentId', 'name'];
+
+// 系统内部字段（完全不显示在页面上）
+const SYSTEM_FIELDS = ['id', 'createdAt', 'updatedAt'];
 
 // 常用字段中文映射（遇到这些列名自动识别）
 const FIELD_NAME_MAP = {
@@ -1923,6 +1926,10 @@ const FIELD_NAME_MAP = {
   'highSchool': '毕业中学',
   'parentName': '家长姓名',
   'parentPhone': '家长联系方式',
+  'fatherName': '父亲姓名',
+  'fatherPhone': '父亲联系方式',
+  'motherName': '母亲姓名',
+  'motherPhone': '母亲联系方式',
   'emergencyContact': '紧急联系人',
   'emergencyPhone': '紧急联系电话',
   'studentStatus': '学籍状态',
@@ -1940,7 +1947,7 @@ const FIELD_GROUPS = {
   '基本信息': ['studentId', 'name', 'gender', 'ethnicity', 'birthDate', 'politicalStatus', 'idCard'],
   '学籍信息': ['gradeLevel', 'year', 'major', 'className', 'studentStatus', 'enrollmentDate', 'graduationDate'],
   '联系方式': ['phone', 'email', 'qq', 'wechat', 'address', 'dormitory'],
-  '家庭信息': ['parentName', 'parentPhone', 'emergencyContact', 'emergencyPhone', 'nativePlace', 'highSchool'],
+  '家庭信息': ['parentName', 'parentPhone', 'fatherName', 'fatherPhone', 'motherName', 'motherPhone', 'emergencyContact', 'emergencyPhone', 'nativePlace', 'highSchool'],
   '生涯发展': ['careerGoal'],
   '其他信息': []
 };
@@ -1967,34 +1974,38 @@ function columnToFieldKey(columnName) {
   }
   // 常见列名规则化
   const rules = [
-    [/学号|考号|编号|学籍号/, 'studentId'],
-    [/姓名|学生姓名|名字/, 'name'],
-    [/性别|男女/, 'gender'],
-    [/民族|族别/, 'ethnicity'],
-    [/出生日期|生日|出生年月/, 'birthDate'],
-    [/学历层次|学历|培养层次|层次/, 'gradeLevel'],
-    [/年级|入学年份|届/, 'year'],
-    [/专业|专业名称/, 'major'],
-    [/班级|行政班|教学班/, 'className'],
-    [/手机|电话|联系方式|手机号|联系电话/, 'phone'],
-    [/家庭住址|住址|地址|家庭地址|现住址/, 'address'],
-    [/生涯规划|生涯目标|规划目标|职业规划|毕业意向/, 'careerGoal'],
-    [/政治面貌|党派/, 'politicalStatus'],
-    [/身份证号|身份证|证件号/, 'idCard'],
-    [/邮箱|电子邮箱|邮件/, 'email'],
-    [/QQ/, 'qq'],
-    [/微信|微信号/, 'wechat'],
-    [/宿舍|寝室|房间号/, 'dormitory'],
-    [/籍贯|生源地/, 'nativePlace'],
-    [/入学日期|入学时间/, 'enrollmentDate'],
-    [/预计毕业|毕业日期|离校时间/, 'graduationDate'],
-    [/毕业中学|高中/, 'highSchool'],
-    [/家长姓名|父亲|母亲|监护人/, 'parentName'],
-    [/家长电话|家长联系方式|家长手机/, 'parentPhone'],
-    [/紧急联系人|紧急联系人姓名/, 'emergencyContact'],
-    [/紧急联系电话|紧急电话/, 'emergencyPhone'],
-    [/学籍状态|在读状态|状态/, 'studentStatus'],
-    [/备注|说明|备注信息/, 'notes']
+    [/^(学号|考号|编号|学籍号)$/, 'studentId'],
+    [/^(姓名|学生姓名|名字)$/, 'name'],
+    [/^(性别|男女)$/, 'gender'],
+    [/^(民族|族别)$/, 'ethnicity'],
+    [/^(出生日期|生日|出生年月)$/, 'birthDate'],
+    [/^(学历层次|学历|培养层次|层次)$/, 'gradeLevel'],
+    [/^(年级|入学年份|届)$/, 'year'],
+    [/^(专业|专业名称)$/, 'major'],
+    [/^(班级|行政班|教学班)$/, 'className'],
+    [/^(手机|电话|联系方式|手机号|联系电话)$/, 'phone'],
+    [/^(家庭住址|住址|地址|家庭地址|现住址)$/, 'address'],
+    [/^(生涯规划|生涯目标|规划目标|职业规划|毕业意向)$/, 'careerGoal'],
+    [/^(政治面貌|党派)$/, 'politicalStatus'],
+    [/^(身份证号|身份证|证件号)$/, 'idCard'],
+    [/^(邮箱|电子邮箱|邮件)$/, 'email'],
+    [/^(QQ)$/, 'qq'],
+    [/^(微信|微信号)$/, 'wechat'],
+    [/^(宿舍|寝室|房间号)$/, 'dormitory'],
+    [/^(籍贯|生源地)$/, 'nativePlace'],
+    [/^(入学日期|入学时间)$/, 'enrollmentDate'],
+    [/^(预计毕业|毕业日期|离校时间)$/, 'graduationDate'],
+    [/^(毕业中学|高中)$/, 'highSchool'],
+    [/^(父亲联系方式|父亲电话|父亲手机|爸爸联系方式)$/, 'fatherPhone'],
+    [/^(母亲联系方式|母亲电话|母亲手机|妈妈联系方式)$/, 'motherPhone'],
+    [/^(父亲姓名|父亲名字|爸爸姓名)$/, 'fatherName'],
+    [/^(母亲姓名|母亲名字|妈妈姓名)$/, 'motherName'],
+    [/^(家长姓名|监护人姓名)$/, 'parentName'],
+    [/^(家长电话|家长联系方式|家长手机)$/, 'parentPhone'],
+    [/^(紧急联系人|紧急联系人姓名)$/, 'emergencyContact'],
+    [/^(紧急联系电话|紧急电话)$/, 'emergencyPhone'],
+    [/^(学籍状态|在读状态|状态)$/, 'studentStatus'],
+    [/^(备注|说明|备注信息)$/, 'notes']
   ];
   for (const [regex, key] of rules) {
     if (regex.test(lower)) return key;
@@ -2040,13 +2051,31 @@ async function syncStudentFields(students) {
   });
 
   const newFields = [];
+
+  // 先确保核心字段存在
+  CORE_FIELDS.forEach(key => {
+    const existing = existingMap[key];
+    newFields.push({
+      key,
+      name: existing?.name || getFieldDisplayName(key),
+      system: true,
+      core: true,
+      type: 'text',
+      filterable: existing?.filterable !== undefined ? existing.filterable : true,
+      showInList: existing?.showInList !== undefined ? existing.showInList : true
+    });
+  });
+
+  // 其他字段
   Object.keys(fieldValues).forEach(key => {
+    if (CORE_FIELDS.includes(key)) return;
     const existing = existingMap[key];
     const values = fieldValues[key];
     newFields.push({
       key,
       name: existing?.name || getFieldDisplayName(key),
       system: false,
+      core: false,
       type: existing?.type || detectFieldType(key, values),
       filterable: existing?.filterable !== undefined ? existing.filterable : true,
       showInList: existing?.showInList !== undefined ? existing.showInList : state.studentListColumns.includes(key)
@@ -2059,13 +2088,19 @@ async function syncStudentFields(students) {
   newFields.sort((a, b) => {
     const oa = orderMap[a.key] !== undefined ? orderMap[a.key] : 1000;
     const ob = orderMap[b.key] !== undefined ? orderMap[b.key] : 1000;
+    // 核心字段始终排在最前面
+    if (a.core && !b.core) return -1;
+    if (b.core && !a.core) return 1;
     if (oa !== ob) return oa - ob;
     return a.name.localeCompare(b.name, 'zh-CN');
   });
 
   state.studentFields = newFields;
 
-  // 同步列表列：保留已存在的，自动添加新发现的默认字段
+  // 同步列表列：默认显示核心字段 + 默认列
+  if (!state.studentListColumns.includes('studentId')) state.studentListColumns.unshift('studentId');
+  if (!state.studentListColumns.includes('name')) state.studentListColumns.unshift('name');
+
   DEFAULT_LIST_COLUMNS.forEach(col => {
     if (!state.studentListColumns.includes(col) && newFields.find(f => f.key === col)) {
       state.studentListColumns.push(col);
@@ -2635,16 +2670,16 @@ function renderStudentList(container) {
 
   container.innerHTML = `
     <div class="card">
-      <div class="card-header">
-        <div>
-          <div class="card-title">学生数据管理</div>
-          <div class="card-subtitle">共 ${students.length} 名学生 · 已识别 ${state.studentFields.length} 个信息分类 · 支持Excel批量导入</div>
-        </div>
-        <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <div class="card-header" style="justify-content:flex-start;align-items:flex-start;gap:24px">
+        <div style="display:flex;gap:8px;flex-wrap:wrap;flex-shrink:0">
           <button class="btn btn-primary" onclick="triggerStudentImport()">📥 导入Excel</button>
           <button class="btn btn-outline" onclick="showAddStudentForm()">➕ 手动添加</button>
           <button class="btn btn-outline" onclick="showFieldManager()">⚙️ 调整字段</button>
           <button class="btn btn-outline" onclick="exportStudentsList()">📤 导出列表</button>
+        </div>
+        <div>
+          <div class="card-title">学生数据管理</div>
+          <div class="card-subtitle">共 ${students.length} 名学生 · 已识别 ${state.studentFields.length} 个信息分类 · 支持Excel批量导入</div>
         </div>
       </div>
 
@@ -2757,9 +2792,7 @@ function renderCellValue(fieldKey, value) {
     if (defaults[fieldKey] && state.studentFields.find(f => f.key === fieldKey)) return `<span class="text-muted">${defaults[fieldKey]}</span>`;
     return '-';
   }
-  if (fieldKey === 'name') return desensitizeName(value);
   if (fieldKey === 'careerGoal') return `<span class="tag tag-blue">${value}</span>`;
-  if (fieldKey === 'phone') return desensitizePhone(value);
   return escapeHtml(value);
 }
 
@@ -3117,7 +3150,7 @@ async function showStudentDetail(id) {
   }
   assessmentRanks.sort((a, b) => b.year.localeCompare(a.year));
 
-  showModal(`${desensitizeName(student.name)} - 学生详情`, `
+  showModal(`${student.name} - 学生详情`, `
     ${renderStudentInfoGroups(student)}
 
     <div class="section-title">📊 学业排名（按学期）</div>
@@ -3195,14 +3228,6 @@ function renderStudentInfoGroups(student) {
         value = defaults[key] || '-';
       }
 
-      // 隐私脱敏
-      if (key === 'name') value = desensitizeName(value);
-      else if (key === 'phone') value = desensitizePhone(value);
-      else if (key === 'address') value = desensitizeAddr(value);
-      else if (key === 'parentPhone' || key === 'emergencyPhone' || key === 'idCard') {
-        value = desensitizePhone(value);
-      }
-
       // 标签化展示
       if (key === 'careerGoal') value = `<span class="tag tag-blue">${value}</span>`;
       else if (key === 'politicalStatus' && value === '中共党员') value = `<span class="tag tag-red">${value}</span>`;
@@ -3252,13 +3277,12 @@ async function exportStudentsList() {
 // ---------- 字段管理器 ----------
 function showFieldManager() {
   const allFields = [...state.studentFields];
-  // 确保核心字段存在且不可隐藏/删除
-  const coreKeys = ['studentId', 'name'];
+  const coreKeys = CORE_FIELDS;
 
   const bodyHTML = `
     <div style="margin-bottom:16px">
       <div style="font-size:13px;color:var(--text-muted);margin-bottom:12px">
-        勾选「显示在列表」的字段会出现在学生总览表中。您可以通过上移/下移调整列表中的显示顺序。
+        勾选「显示在列表」的字段会出现在学生总览表中。核心字段（学号、姓名）不可删除，但可调整显示顺序和是否作为筛选器。
       </div>
       <div style="display:flex;gap:8px;margin-bottom:12px">
         <input type="text" class="input" id="newFieldName" placeholder="输入新字段名称（如：入党时间）" style="flex:1">
@@ -3300,9 +3324,10 @@ function renderFieldManagerRow(field, index, coreKeys) {
       </td>
       <td>
         <input type="text" class="input field-name-input" data-key="${field.key}" value="${escapeHtml(field.name)}" ${isCore ? 'disabled' : ''} style="min-width:120px">
+        ${isCore ? '<span style="font-size:12px;color:var(--text-muted)">核心字段</span>' : ''}
       </td>
       <td style="text-align:center">
-        <input type="checkbox" class="field-show" data-key="${field.key}" ${isInList ? 'checked' : ''} ${isCore ? 'checked disabled' : ''}>
+        <input type="checkbox" class="field-show" data-key="${field.key}" ${isInList || isCore ? 'checked' : ''} ${isCore ? 'disabled' : ''}>
       </td>
       <td style="text-align:center">
         <input type="checkbox" class="field-filter" data-key="${field.key}" ${field.filterable !== false ? 'checked' : ''} ${isCore ? 'disabled' : ''}>
@@ -3367,8 +3392,8 @@ async function saveFieldManager() {
     }
   });
 
-  // 读取列表显示设置
-  state.studentListColumns = ['studentId', 'name'];
+  // 读取列表显示设置（核心字段始终显示）
+  state.studentListColumns = [...CORE_FIELDS];
   document.querySelectorAll('.field-show:checked').forEach(cb => {
     const key = cb.dataset.key;
     if (!state.studentListColumns.includes(key)) state.studentListColumns.push(key);
@@ -3488,7 +3513,7 @@ function updateGradeRanking() {
     <tr class="row-clickable" onclick="showStudentDetail(${r.student.id})">
       <td><span class="tag ${i<3?'tag-red':'tag-blue'}">${i+1}</span></td>
       <td>${r.student.studentId}</td>
-      <td>${desensitizeName(r.student.name)}</td>
+      <td>${r.student.name}</td>
       <td>${r.student.className||'-'}</td>
       <td style="font-weight:700">${r.avg?.toFixed(2)||'-'}</td>
       <td>${r.totalCredit.toFixed(1)}</td>
@@ -3646,7 +3671,7 @@ async function updateGradeCompare() {
     const diffText = diff === '-' ? '-' : (diff > 0 ? `<span class="tag tag-green">↑${diff}</span>` : diff < 0 ? `<span class="tag tag-red">↓${Math.abs(diff)}</span>` : '<span class="tag tag-gray">=</span>');
     return `<tr>
       <td>${g.student.studentId}</td>
-      <td>${desensitizeName(g.student.name)}</td>
+      <td>${g.student.name}</td>
       <td>${g.student.className||'-'}</td>
       <td>${g.avg?.toFixed(2)||'-'}</td>
       <td><span class="tag tag-blue">${i+1}</span></td>
@@ -3726,7 +3751,7 @@ function calcCustomRanking() {
           ${ranked.map((r, i) => `<tr class="row-clickable" onclick="showStudentDetail(${r.student.id})">
             <td><span class="tag ${i<3?'tag-red':'tag-blue'}">${i+1}</span></td>
             <td>${r.student.studentId}</td>
-            <td>${desensitizeName(r.student.name)}</td>
+            <td>${r.student.name}</td>
             <td>${major ? (r.student.major||'-') : (r.student.className||'-')}</td>
             <td style="font-weight:700">${r.avg?.toFixed(2)||'-'}</td>
             <td>${r.courseCount}</td>
@@ -3913,7 +3938,7 @@ function updateAssessRanking() {
     <tr class="row-clickable" onclick="showStudentDetail(${r.student.id})">
       <td><span class="tag ${i<3?'tag-red':'tag-blue'}">${i+1}</span></td>
       <td>${r.student.studentId}</td>
-      <td>${desensitizeName(r.student.name)}</td>
+      <td>${r.student.name}</td>
       <td>${r.student.className||'-'}</td>
       <td style="font-weight:700">${r.score?.toFixed(2)||'-'}</td>
     </tr>
@@ -4064,7 +4089,7 @@ async function updateAssessCompare() {
     const diffText = diff === '-' ? '-' : (diff > 0 ? `<span class="tag tag-green">↑${diff}</span>` : diff < 0 ? `<span class="tag tag-red">↓${Math.abs(diff)}</span>` : '<span class="tag tag-gray">=</span>');
     return `<tr>
       <td>${a.student.studentId}</td>
-      <td>${desensitizeName(a.student.name)}</td>
+      <td>${a.student.name}</td>
       <td>${a.student.className||'-'}</td>
       <td>${a.score?.toFixed(2)||'-'}</td>
       <td><span class="tag tag-blue">${i+1}</span></td>
