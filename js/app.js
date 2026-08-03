@@ -168,8 +168,19 @@ function getFieldDisplayName(key) {
 async function loadStudentFieldConfig() {
   const savedFields = await getSetting('studentFields');
   const savedColumns = await getSetting('studentListColumns');
-  state.studentFields = savedFields || [];
-  state.studentListColumns = savedColumns || DEFAULT_LIST_COLUMNS;
+  const configVersion = await getSetting('fieldConfigVersion');
+
+  // V2 迁移：清除旧的字段配置，让 syncStudentFields 重新识别所有字段并自动显示
+  // 这样之前导入但未显示的字段（如父亲联系方式、母亲联系方式等）会自动出现在表格中
+  if (!configVersion || configVersion < 2) {
+    state.studentFields = [];
+    state.studentListColumns = [];
+    await setSetting('fieldConfigVersion', 2);
+    await saveStudentFieldConfig();
+  } else {
+    state.studentFields = savedFields || [];
+    state.studentListColumns = savedColumns || DEFAULT_LIST_COLUMNS;
+  }
 }
 
 // 保存字段配置
@@ -240,16 +251,21 @@ async function syncStudentFields(students) {
 
   state.studentFields = newFields;
 
-  // 同步列表列：默认显示核心字段 + 默认列
+  // 同步列表列：核心字段始终显示
   if (!state.studentListColumns.includes('studentId')) state.studentListColumns.unshift('studentId');
-  if (!state.studentListColumns.includes('name')) state.studentListColumns.unshift('name');
+  if (!state.studentListColumns.includes('name')) {
+    const idx = state.studentListColumns.indexOf('studentId');
+    state.studentListColumns.splice(idx + 1, 0, 'name');
+  }
 
-  DEFAULT_LIST_COLUMNS.forEach(col => {
-    if (!state.studentListColumns.includes(col) && newFields.find(f => f.key === col)) {
-      state.studentListColumns.push(col);
+  // 新发现的字段（之前不在 existingMap 中的）自动加入列表显示
+  newFields.forEach(f => {
+    if (!state.studentListColumns.includes(f.key) && !existingMap[f.key]) {
+      state.studentListColumns.push(f.key);
     }
   });
-  // 清理不存在的列
+
+  // 清理不存在的列（学生数据中已没有该字段）
   state.studentListColumns = state.studentListColumns.filter(col => newFields.find(f => f.key === col));
 
   await saveStudentFieldConfig();
@@ -1482,9 +1498,35 @@ function renderFieldManagerRow(field, index, coreKeys) {
   `;
 }
 
+// 在重新渲染字段管理器表格前，保存当前勾选状态到 state
+function saveCheckboxStateBeforeRerender() {
+  // 保存列表显示勾选
+  const checkedKeys = new Set();
+  document.querySelectorAll('.field-show:checked').forEach(cb => {
+    checkedKeys.add(cb.dataset.key);
+  });
+  // 核心字段始终显示
+  CORE_FIELDS.forEach(k => checkedKeys.add(k));
+  // 更新 studentListColumns：保留 checked 的，移除 unchecked 的
+  state.studentListColumns = state.studentListColumns.filter(k => checkedKeys.has(k));
+  // 添加新勾选的
+  checkedKeys.forEach(k => {
+    if (!state.studentListColumns.includes(k)) state.studentListColumns.push(k);
+  });
+
+  // 保存筛选器勾选
+  document.querySelectorAll('.field-filter').forEach(cb => {
+    const key = cb.dataset.key;
+    const field = state.studentFields.find(f => f.key === key);
+    if (field) field.filterable = cb.checked;
+  });
+}
+
 function moveField(index, direction) {
   const newIndex = index + direction;
   if (newIndex < 0 || newIndex >= state.studentFields.length) return;
+  // 先保存当前勾选状态
+  saveCheckboxStateBeforeRerender();
   const temp = state.studentFields[index];
   state.studentFields[index] = state.studentFields[newIndex];
   state.studentFields[newIndex] = temp;
@@ -1499,8 +1541,19 @@ function addCustomField() {
   if (!name) { showToast('请输入字段名称', 'error'); return; }
 
   const key = columnToFieldKey(name);
-  if (state.studentFields.find(f => f.key === key)) {
-    showToast('该字段已存在', 'error'); return;
+  const existingField = state.studentFields.find(f => f.key === key);
+  if (existingField) {
+    // 字段已存在：自动勾选「列表显示」并提示用户
+    if (!state.studentListColumns.includes(key)) {
+      state.studentListColumns.push(key);
+    }
+    input.value = '';
+    // 保存当前勾选状态后重新渲染
+    saveCheckboxStateBeforeRerender();
+    const allFields = [...state.studentFields];
+    document.getElementById('fieldManagerBody').innerHTML = allFields.map((f, i) => renderFieldManagerRow(f, i, ['studentId', 'name'])).join('');
+    showToast(`字段「${existingField.name}」已存在，已自动开启列表显示`, 'success');
+    return;
   }
 
   state.studentFields.push({
@@ -1509,16 +1562,24 @@ function addCustomField() {
     system: false,
     type: 'text',
     filterable: true,
-    showInList: false
+    showInList: true
   });
+  // 新字段自动加入列表显示
+  if (!state.studentListColumns.includes(key)) {
+    state.studentListColumns.push(key);
+  }
 
   input.value = '';
+  saveCheckboxStateBeforeRerender();
   const allFields = [...state.studentFields];
   document.getElementById('fieldManagerBody').innerHTML = allFields.map((f, i) => renderFieldManagerRow(f, i, ['studentId', 'name'])).join('');
+  showToast(`字段「${name}」已添加`, 'success');
 }
 
 function deleteField(key) {
   if (!confirm(`确定删除字段「${getFieldDisplayName(key)}」吗？该字段在学生数据中的值仍会保留，只是不再作为独立字段管理。`)) return;
+  // 先保存当前勾选状态
+  saveCheckboxStateBeforeRerender();
   state.studentFields = state.studentFields.filter(f => f.key !== key);
   state.studentListColumns = state.studentListColumns.filter(c => c !== key);
   const allFields = [...state.studentFields];
