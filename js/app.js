@@ -84,8 +84,8 @@ const FIELD_NAME_MAP = {
   'notes': '备注'
 };
 
-// 默认总览表显示列
-const DEFAULT_LIST_COLUMNS = ['studentId', 'name', 'gender', 'year', 'major', 'className', 'ethnicity', 'gradeLevel', 'careerGoal'];
+// 默认总览表显示列（新增父母联系方式默认显示）
+const DEFAULT_LIST_COLUMNS = ['studentId', 'name', 'gender', 'year', 'major', 'className', 'ethnicity', 'gradeLevel', 'careerGoal', 'phone', 'fatherPhone', 'motherPhone'];
 
 // 字段分组（用于详情页展示）
 const FIELD_GROUPS = {
@@ -108,9 +108,25 @@ function detectFieldType(key, values) {
   return 'text';
 }
 
+// 标准化学号（去除所有空白，统一为字符串）
+function normalizeStudentId(id) {
+  if (id == null || id === '') return '';
+  return String(id).replace(/[\s\u00A0\u200B-\u200D\uFEFF]+/g, '').trim();
+}
+
+// 清理列名（去除所有空白和不可见字符）
+function cleanColumnName(name) {
+  return String(name ?? '')
+    .replace(/[\s\u00A0\u200B-\u200D\uFEFF]+/g, '')
+    .replace(/^[^\u4e00-\u9fa5a-zA-Z0-9_]+/g, '')
+    .replace(/[^\u4e00-\u9fa5a-zA-Z0-9_]+$/g, '')
+    .trim();
+}
+
 // 从列名推断字段key
 function columnToFieldKey(columnName) {
-  const lower = String(columnName).trim();
+  const lower = cleanColumnName(columnName);
+  if (!lower) return 'custom_unknown';
 
   // 1. 先检查精确规则匹配（最具体，如"父亲联系方式"优先于"联系方式"）
   const rules = [
@@ -162,7 +178,8 @@ function columnToFieldKey(columnName) {
   }
 
   // 4. 未知列名：使用安全的自定义 key
-  return 'custom_' + lower.replace(/[^\u4e00-\u9fa5a-zA-Z0-9_]/g, '_').replace(/_+/g, '_').replace(/^_|_$/g, '').substring(0, 50);
+  const safeKey = lower.replace(/[^\u4e00-\u9fa5a-zA-Z0-9_]/g, '_').replace(/_+/g, '_').replace(/^_|_$/g, '').substring(0, 50);
+  return safeKey ? 'custom_' + safeKey : 'custom_unknown';
 }
 
 // 获取字段显示名
@@ -178,12 +195,11 @@ async function loadStudentFieldConfig() {
   const savedColumns = await getSetting('studentListColumns');
   const configVersion = await getSetting('fieldConfigVersion');
 
-  // V3 迁移：清除旧的字段配置，让 syncStudentFields 重新识别所有字段并自动显示
-  // V2 仍有 bug（父亲/母亲联系方式映射错误、字段管理器添加失效），V3 彻底修复
-  if (!configVersion || configVersion < 3) {
+  // V4 迁移：清除旧的字段配置，重新识别所有字段并自动显示父母联系方式等字段
+  if (!configVersion || configVersion < 4) {
     state.studentFields = [];
     state.studentListColumns = [];
-    await setSetting('fieldConfigVersion', 3);
+    await setSetting('fieldConfigVersion', 4);
     await saveStudentFieldConfig();
   } else {
     state.studentFields = savedFields || [];
@@ -270,6 +286,14 @@ async function syncStudentFields(students) {
   newFields.forEach(f => {
     if (!state.studentListColumns.includes(f.key) && !existingMap[f.key]) {
       state.studentListColumns.push(f.key);
+    }
+  });
+
+  // 父母联系方式类字段强制默认显示（如果数据中存在）
+  const familyContactFields = ['fatherPhone', 'motherPhone', 'parentPhone', 'fatherName', 'motherName'];
+  familyContactFields.forEach(key => {
+    if (fieldValues[key] && !state.studentListColumns.includes(key)) {
+      state.studentListColumns.push(key);
     }
   });
 
@@ -1059,14 +1083,51 @@ async function handleStudentExcelImport(file) {
     // 合并已有数据（按学号去重深合并）
     const existing = await dbGetAll('students');
     const existingById = {};
-    existing.forEach(s => { existingById[s.studentId] = s; });
+    existing.forEach(s => { existingById[normalizeStudentId(s.studentId)] = s; });
+
+    // 先清理数据库中已有的重复学号（保留更新时间最晚的一条）
+    const duplicates = new Map();
+    existing.forEach(s => {
+      const sid = normalizeStudentId(s.studentId);
+      if (!sid) return;
+      if (!duplicates.has(sid)) {
+        duplicates.set(sid, []);
+      }
+      duplicates.get(sid).push(s);
+    });
+    for (const [sid, list] of duplicates) {
+      if (list.length > 1) {
+        list.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+        const keeper = list[0];
+        // 合并重复记录中的非空字段
+        for (let i = 1; i < list.length; i++) {
+          const dup = list[i];
+          Object.keys(dup).forEach(key => {
+            if (SYSTEM_FIELDS.includes(key)) return;
+            if (key === 'studentId') return;
+            const val = dup[key];
+            if (val !== '' && val != null && !keeper[key]) {
+              keeper[key] = val;
+            }
+          });
+        }
+        keeper.updatedAt = Date.now();
+        await dbPut('students', keeper);
+        // 删除其余重复记录
+        for (let i = 1; i < list.length; i++) {
+          await dbDelete('students', list[i].id);
+          delete existingById[normalizeStudentId(list[i].studentId)];
+        }
+        existingById[sid] = keeper;
+      }
+    }
 
     let newCount = 0, updateCount = 0;
-    const allStudents = [];
 
     for (const student of valid) {
-      const exist = existingById[student.studentId];
-      if (exist) {
+      const sid = normalizeStudentId(student.studentId);
+      const exist = existingById[sid];
+      if (exist && sid) {
         // 深合并：保留旧数据，新数据覆盖同名字段，新增字段追加
         const merged = { ...exist };
         Object.keys(student).forEach(key => {
@@ -1078,13 +1139,14 @@ async function handleStudentExcelImport(file) {
         });
         merged.updatedAt = Date.now();
         await dbPut('students', merged);
-        existingById[student.studentId] = merged;
+        existingById[sid] = merged;
         updateCount++;
       } else {
         student.createdAt = Date.now();
         student.updatedAt = Date.now();
+        student.studentId = sid || student.studentId;
         await dbAdd('students', student);
-        existingById[student.studentId] = student;
+        if (sid) existingById[sid] = student;
         newCount++;
       }
     }
@@ -1094,7 +1156,8 @@ async function handleStudentExcelImport(file) {
     await syncStudentFields(updatedStudents);
 
     hideLoading();
-    showToast(`导入完成：新增 ${newCount} 人，合并更新 ${updateCount} 人，识别 ${state.studentFields.length} 个字段`, 'success');
+    const finalCount = updatedStudents.length;
+    showToast(`导入完成：新增 ${newCount} 人，合并更新 ${updateCount} 人，当前共 ${finalCount} 人，识别 ${state.studentFields.length} 个字段`, 'success');
     state.students = updatedStudents;
     navigateTo('students');
   } catch (err) {
@@ -1111,7 +1174,8 @@ function readExcelFile(file) {
       try {
         const wb = XLSX.read(e.target.result, { type: 'array' });
         const ws = wb.Sheets[wb.SheetNames[0]];
-        const data = XLSX.utils.sheet_to_json(ws, { defval: '' });
+        // raw: false 保留 Excel 中显示的文本格式，避免长数字学号被转成数字格式
+        const data = XLSX.utils.sheet_to_json(ws, { defval: '', raw: false });
         resolve(data);
       } catch (err) { reject(err); }
     };
@@ -1141,6 +1205,11 @@ function mapStudentRowDynamic(row) {
     // 如果同一字段出现多次，后面的覆盖前面的
     result[fieldKey] = value;
   });
+
+  // 学号统一标准化，确保跨表格合并时不会因为空格/格式差异产生重复
+  if (result.studentId) {
+    result.studentId = normalizeStudentId(result.studentId);
+  }
 
   // 核心字段默认值
   if (!result.ethnicity) result.ethnicity = '汉族';
