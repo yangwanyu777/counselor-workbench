@@ -12,6 +12,6 @@
    ============================================ */
 
 const SUPABASE_CONFIG = {
-  url: '',        // 例：https://xxxxxxxxxxxxx.supabase.co
-  anonKey: ''     // 例：eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+  url: 'https://hgokbmusjoqencorjtaj.supabase.co',
+  anonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imhnb2tibXVzam9xZW5jb3JqdGFqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODU3NDg5OTksImV4cCI6MjEwMTMyNDk5OX0.fc-VMCY6BCfg5VwbR2TEKPcOsG5bOjMF9VDEfOsVytg'     // 例：eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
 };
