@@ -452,6 +452,63 @@ table.data-table tbody tr:hover { background: var(--bg-blue); }
 
 table.data-table tbody tr.row-clickable { cursor: pointer; }
 
+/* 表头下拉筛选（WPS 风格） */
+table.data-table thead th.th-filter {
+  cursor: pointer;
+  position: relative;
+  padding-right: 22px;
+  user-select: none;
+}
+
+table.data-table thead th.th-filter:hover {
+  background: #E2E8F0;
+}
+
+.th-filter-icon {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 10px;
+  color: var(--text-muted);
+  pointer-events: none;
+}
+
+.th-filter.active .th-filter-icon,
+table.data-table thead th.th-filter.active {
+  color: var(--primary);
+}
+
+.header-filter-menu {
+  position: fixed;
+  background: #fff;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+  min-width: 140px;
+  max-height: 320px;
+  overflow-y: auto;
+  z-index: 10001;
+  padding: 4px 0;
+}
+
+.header-filter-item {
+  padding: 8px 14px;
+  font-size: 13px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.header-filter-item:hover {
+  background: var(--bg-blue);
+}
+
+.header-filter-item.active {
+  color: var(--primary);
+  font-weight: 700;
+  background: var(--bg-blue);
+}
+
 /* 统计卡片 */
 .stat-grid {
   display: grid;
@@ -490,6 +547,30 @@ table.data-table tbody tr.row-clickable { cursor: pointer; }
 .stat-card.stat-green { border-left-color: var(--success); }
 .stat-card.stat-orange { border-left-color: var(--warning); }
 .stat-card.stat-red { border-left-color: var(--danger); }
+
+.stat-grid-3 { grid-template-columns: repeat(3, 1fr); }
+
+.stat-card .stat-detail {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  margin-top: 10px;
+  font-size: 12px;
+  color: var(--text-body);
+}
+
+.stat-card .stat-detail span {
+  background: var(--bg-light);
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+
+.stat-card .stat-ethnic {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
 
 /* 筛选栏 */
 .filter-bar {
@@ -722,6 +803,9 @@ table.data-table tbody tr.row-clickable { cursor: pointer; }
   margin-top: 16px;
   flex-wrap: wrap;
 }
+
+.pagination.pagination-left { justify-content: flex-start; }
+.pagination.pagination-top { margin-top: 0; margin-bottom: 12px; }
 
 .pagination button {
   padding: 6px 12px;
