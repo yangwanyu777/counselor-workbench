@@ -13,7 +13,6 @@ const state = {
   currentPage: 1,
   pageSize: 20,
   filterConditions: {},
-  headerFilterConditions: {}, // 表头下拉筛选条件
   charts: {},
   editingStudentId: null,
   fileImportCallback: null,
@@ -888,8 +887,8 @@ function renderStudentList(container) {
   const students = state.students;
   const columns = state.studentListColumns.filter(c => !SYSTEM_FIELDS.includes(c));
 
-  // 顶部固定筛选器：只保留搜索 + 学历层次 + 年级 + 专业 + 班级
-  const topFilterFields = ['gradeLevel', 'year', 'major', 'className'];
+  // 顶部固定筛选器：搜索 + 学历层次 + 年级 + 专业 + 班级 + 性别 + 民族 + 政治面貌
+  const topFilterFields = ['gradeLevel', 'year', 'major', 'className', 'gender', 'ethnicity', 'politicalStatus'];
   const topFiltersHtml = topFilterFields.map(key => {
     const field = state.studentFields.find(f => f.key === key);
     if (!field) return '';
@@ -932,13 +931,7 @@ function renderStudentList(container) {
           <thead>
             <tr>
               <th style="width:36px"><input type="checkbox" id="selectAllCheckbox" onchange="toggleSelectAll(this)"></th>
-              ${columns.map(c => {
-                const isTopFilter = topFilterFields.includes(c);
-                const filterClass = isTopFilter ? '' : 'th-filter';
-                const filterClick = isTopFilter ? '' : `onclick="handleHeaderFilterClick(event, '${c}')"`;
-                const icon = isTopFilter ? '' : '<span class="th-filter-icon">▼</span>';
-                return `<th class="${filterClass}" data-field="${c}" ${filterClick}>${getFieldDisplayName(c)}${icon}</th>`;
-              }).join('')}
+              ${columns.map(c => `<th>${getFieldDisplayName(c)}</th>`).join('')}
               <th>操作</th>
             </tr>
           </thead>
@@ -971,9 +964,6 @@ function applyStudentFilter() {
     const value = sel.value;
     if (value) filterConditions[field] = value;
   });
-
-  // 合并表头下拉筛选条件（表头筛选优先级更高，可覆盖顶部同名条件）
-  Object.assign(filterConditions, state.headerFilterConditions);
 
   state.filteredStudents = state.students.filter(s => {
     if (search && !(s.name?.toLowerCase().includes(search) || s.studentId?.includes(search))) return false;
@@ -1099,18 +1089,22 @@ function renderStudentStats(students) {
 function renderStatCard(label, stat, color, icon) {
   if (!stat) return '';
   const ethnicEntries = Object.entries(stat.ethnicities).sort((a, b) => b[1] - a[1]);
-  const ethnicTop3 = ethnicEntries.slice(0, 3).map(([k, v]) => `${k}${v}人`).join('、');
-  const ethnicMore = ethnicEntries.length > 3 ? `等${ethnicEntries.length}个民族` : '';
+  const ethnicTop3 = ethnicEntries.slice(0, 2).map(([k, v]) => `${k}${v}`).join('、');
+  const ethnicMore = ethnicEntries.length > 2 ? ` 等${ethnicEntries.length}个民族` : '';
   return `
     <div class="stat-card ${color}">
-      <div class="stat-icon">${icon}</div>
-      <div class="stat-value">${stat.total}</div>
-      <div class="stat-label">在校${label}总数</div>
-      <div class="stat-detail">
-        <span>男 ${stat.male}</span><span>女 ${stat.female}</span>
-        <span>党员 ${stat.party}</span><span>团员 ${stat.league}</span><span>群众 ${stat.mass}</span>
+      <div class="stat-main">
+        <div class="stat-icon">${icon}</div>
+        <div>
+          <div class="stat-value">${stat.total}</div>
+          <div class="stat-label">在校${label}总数</div>
+        </div>
       </div>
-      ${ethnicTop3 ? `<div class="stat-ethnic">民族：${ethnicTop3}${ethnicMore}</div>` : ''}
+      <div class="stat-detail">
+        <span>男${stat.male}</span><span>女${stat.female}</span>
+        <span>党员${stat.party}</span><span>团员${stat.league}</span><span>群众${stat.mass}</span>
+        ${ethnicTop3 ? `<span class="stat-ethnic-span">民族 ${ethnicTop3}${ethnicMore}</span>` : ''}
+      </div>
     </div>
   `;
 }
@@ -1158,60 +1152,6 @@ function computeStudentStats(students) {
   });
 
   return result;
-}
-
-// ========== 表头下拉筛选（类似 WPS） ==========
-function handleHeaderFilterClick(event, field) {
-  // 只响应点击下拉图标
-  if (!event.target.classList.contains('th-filter-icon')) return;
-  event.stopPropagation();
-  showHeaderFilter(field, event.target);
-}
-
-function showHeaderFilter(field, iconEl) {
-  closeHeaderFilter();
-
-  const values = [...new Set(state.students.map(s => s[field]).filter(Boolean))].sort();
-  if (values.length === 0) return;
-
-  const currentValue = state.headerFilterConditions[field] || '';
-
-  const menu = document.createElement('div');
-  menu.id = 'headerFilterMenu';
-  menu.className = 'header-filter-menu';
-  menu.innerHTML = `
-    <div class="header-filter-item ${!currentValue ? 'active' : ''}" onclick="setHeaderFilter('${field}', '')">全部</div>
-    ${values.map(v => `
-      <div class="header-filter-item ${String(currentValue) === String(v) ? 'active' : ''}" onclick="setHeaderFilter('${field}', '${escapeHtml(v)}')">${escapeHtml(v)}</div>
-    `).join('')}
-  `;
-
-  const rect = iconEl.getBoundingClientRect();
-  menu.style.position = 'fixed';
-  menu.style.top = (rect.bottom + 4) + 'px';
-  menu.style.left = rect.left + 'px';
-  menu.style.zIndex = '10001';
-  document.body.appendChild(menu);
-
-  // 点击外部关闭
-  requestAnimationFrame(() => {
-    document.addEventListener('click', closeHeaderFilter, { once: true });
-  });
-}
-
-function closeHeaderFilter() {
-  const menu = document.getElementById('headerFilterMenu');
-  if (menu) menu.remove();
-}
-
-function setHeaderFilter(field, value) {
-  if (value) {
-    state.headerFilterConditions[field] = value;
-  } else {
-    delete state.headerFilterConditions[field];
-  }
-  closeHeaderFilter();
-  applyStudentFilter();
 }
 
 function changeStudentPage(page) {
