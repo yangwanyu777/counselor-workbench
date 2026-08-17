@@ -7,7 +7,7 @@
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
   <title>琬钰老师的辅导员工作台</title>
-  <link rel="stylesheet" href="css/style.css?v=20260805">
+  <link rel="stylesheet" href="css/style.css?v=20260817">
 </head>
 <body>
   <!-- 登录界面 -->
@@ -26,9 +26,10 @@
         <input type="password" id="loginPassword" class="login-input" placeholder="密码" maxlength="32" autocomplete="current-password">
         <button id="loginBtn" class="login-btn">登 录</button>
         <button id="signUpBtn" class="login-btn login-btn-outline">注册新账号</button>
+        <button id="offlineBtn" class="login-btn login-btn-outline" style="border-style:dashed">🏠 离线模式进入</button>
       </div>
       <p id="loginError" class="login-error"></p>
-      <p class="login-hint">登录后数据自动同步云端，换设备登录即可恢复</p>
+      <p class="login-hint">登录后数据自动同步云端，换设备登录即可恢复<br>云端故障时可用「离线模式」，数据仅保存在本设备</p>
     </div>
   </div>
 
@@ -108,9 +109,9 @@
   <script src="assets/supabase.min.js"></script>
 
   <!-- 应用代码（v=20260805 缓存破坏） -->
-  <script src="js/supabase-config.js?v=20260805"></script>
-  <script src="js/storage.js?v=20260805"></script>
-  <script src="js/sync.js?v=20260805"></script>
-  <script src="js/app.js?v=20260805"></script>
+  <script src="js/supabase-config.js?v=20260817"></script>
+  <script src="js/storage.js?v=20260817"></script>
+  <script src="js/sync.js?v=20260817"></script>
+  <script src="js/app.js?v=20260817"></script>
 </body>
 </html>
