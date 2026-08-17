@@ -1294,7 +1294,7 @@ async function handleStudentExcelImport(file) {
 
     if (valid.length === 0) {
       hideLoading();
-      showToast('未识别到有效学生数据，请检查Excel是否包含学号或姓名列', 'error');
+      showToast('未识别到有效学生数据：Excel 需至少包含「学号」或「姓名」列之一（仅有学号列也可上传）', 'error');
       return;
     }
 
@@ -1357,7 +1357,10 @@ async function handleStudentExcelImport(file) {
       if (!exist && nm) exist = existingByName[nm] || null;
 
       if (exist) {
-        // 深合并：新数据覆盖同名字段（含 ethnicity 等），新增字段追加
+        // 深合并规则（与用户约定一致）：
+        // ① 新表中某字段为空/缺失 → 保留原数据，绝不覆盖（mapStudentRowDynamic 已跳过空单元格，这里再兜底判断）
+        // ② 新表字段有非空值 → 覆盖旧值
+        // ③ 新表出现原数据没有的字段 → 追加
         const merged = { ...exist };
         Object.keys(student).forEach(key => {
           if (SYSTEM_FIELDS.includes(key)) return;
