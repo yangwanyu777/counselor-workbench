@@ -336,10 +336,20 @@ async function init() {
 
   if (isSupabaseReady()) {
     // Supabase 模式：检查已保存的登录会话
-    const user = await getCurrentUser();
+    let user = null;
+    try {
+      user = await getCurrentUser();
+    } catch (e) {
+      console.warn('读取本地登录会话失败:', e);
+    }
     if (user) {
-      // 已登录，自动进入并同步
-      await smartSync();
+      // 已登录，自动进入并同步（云端不可达时降级为离线使用，不阻塞进入）
+      try {
+        await smartSync();
+      } catch (e) {
+        console.warn('云端同步失败，本次以本地数据运行:', e);
+        showToast('云端暂时无法连接，本次以本设备数据离线运行', 'info');
+      }
       showApp();
     } else {
       // 未登录，显示登录界面
@@ -370,6 +380,9 @@ function bindAuthEvents() {
   // 注册
   const signUpBtn = document.getElementById('signUpBtn');
   if (signUpBtn) signUpBtn.addEventListener('click', handleSignUp);
+  // 离线模式（云端故障时的应急入口，数据仅保存在本设备浏览器）
+  const offlineBtn = document.getElementById('offlineBtn');
+  if (offlineBtn) offlineBtn.addEventListener('click', handleOfflineMode);
   // 首次设置密码（本地模式）
   document.getElementById('setupBtn').addEventListener('click', handleSetup);
   // 退出
@@ -392,7 +405,12 @@ async function handleLogin() {
 
     try {
       await supabaseSignIn(email, password);
-      const syncResult = await smartSync();
+      let syncResult = 'error';
+      try {
+        syncResult = await smartSync();
+      } catch (syncErr) {
+        console.warn('登录后同步失败，使用本地数据:', syncErr);
+      }
       showApp();
       if (syncResult === 'pulled') {
         showToast('登录成功，已从云端恢复数据', 'success');
@@ -404,7 +422,12 @@ async function handleLogin() {
         showToast('登录成功', 'success');
       }
     } catch (e) {
-      errorEl.textContent = e.message || '登录失败，请检查邮箱和密码';
+      const msg = String(e.message || '');
+      if (/load failed|fetch failed|failed to fetch|network|networkerror|timeout|aborted/i.test(msg)) {
+        errorEl.textContent = '云端服务暂时无法连接：免费版 Supabase 项目可能因一段时间未使用被暂停。可先点击下方「离线模式进入」使用本设备数据，稍后登录 supabase.com 在项目页点击 Restore project 恢复。';
+      } else {
+        errorEl.textContent = msg || '登录失败，请检查邮箱和密码';
+      }
     } finally {
       btn.textContent = '登 录';
       btn.disabled = false;
@@ -442,11 +465,37 @@ async function handleSignUp() {
     showApp();
     showToast('注册成功，欢迎使用工作台', 'success');
   } catch (e) {
-    errorEl.textContent = e.message || '注册失败';
+    const msg = String(e.message || '');
+    if (/load failed|fetch failed|failed to fetch|network|networkerror|timeout|aborted/i.test(msg)) {
+      errorEl.textContent = '云端服务暂时无法连接（项目可能被暂停），请稍后再试或使用「离线模式进入」';
+    } else {
+      errorEl.textContent = msg || '注册失败';
+    }
   } finally {
     btn.textContent = '注册新账号';
     btn.disabled = false;
   }
+}
+
+// 离线模式：云端故障时的应急入口
+// 数据只保存在当前设备的浏览器（IndexedDB）中，不联网，符合隐私保护要求
+async function handleOfflineMode() {
+  const storedHash = await getSetting('password');
+  if (!storedHash) {
+    const pw = prompt('首次使用离线模式，请设置一个本地访问密码（至少6位，仅用于本设备打开时验证）：');
+    if (pw == null) return;
+    if (pw.trim().length < 6) { alert('密码至少6位，请重试'); return; }
+    await setSetting('password', simpleHash(pw.trim()));
+  } else {
+    const pw = prompt('请输入本地访问密码：');
+    if (pw == null) return;
+    if (simpleHash(pw) !== storedHash) { alert('密码错误'); return; }
+  }
+  // 关闭云同步，进入纯本地模式
+  syncState.enabled = false;
+  syncState.userEmail = null;
+  showToast('已进入离线模式：数据仅保存在本设备浏览器。云端恢复后刷新页面即可重新邮箱登录同步', 'info');
+  showApp();
 }
 
 async function handleSetup() {
