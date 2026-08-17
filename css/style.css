@@ -452,23 +452,25 @@ table.data-table tbody tr:hover { background: var(--bg-blue); }
 
 table.data-table tbody tr.row-clickable { cursor: pointer; }
 
-/* 统计卡片 */
+/* 统计卡片（紧凑窄框，左对齐，不受下方表格宽度影响） */
 .stat-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-  gap: 16px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
   margin-bottom: 16px;
 }
 
 .stat-card {
   background: #fff;
   border-radius: var(--radius-md);
-  padding: 12px 14px;
+  padding: 10px 12px;
   box-shadow: var(--shadow-sm);
   border-left: 4px solid var(--primary);
   display: flex;
   flex-direction: column;
   min-width: 0;
+  flex: 0 1 280px;
+  max-width: 280px;
   overflow: hidden;
 }
 
@@ -480,7 +482,7 @@ table.data-table tbody tr.row-clickable { cursor: pointer; }
 }
 
 .stat-card .stat-icon {
-  font-size: 20px;
+  font-size: 18px;
   line-height: 1;
   flex-shrink: 0;
 }
@@ -504,16 +506,11 @@ table.data-table tbody tr.row-clickable { cursor: pointer; }
 .stat-card.stat-orange { border-left-color: var(--warning); }
 .stat-card.stat-red { border-left-color: var(--danger); }
 
-.stat-grid-3 {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 12px;
-}
-
 .stat-card .stat-detail {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px 6px;
-  margin-top: 8px;
+  gap: 4px 5px;
+  margin-top: 7px;
   font-size: 11px;
   color: var(--text-body);
 }
@@ -525,12 +522,29 @@ table.data-table tbody tr.row-clickable { cursor: pointer; }
   white-space: nowrap;
 }
 
-.stat-card .stat-detail .stat-ethnic-span {
-  background: transparent;
-  padding: 0;
+.stat-card .stat-ethnic {
+  margin-top: 7px;
+}
+
+.stat-card .stat-ethnic-title {
+  font-size: 11px;
   color: var(--text-muted);
-  flex-basis: 100%;
-  white-space: normal;
+  margin-bottom: 4px;
+}
+
+.stat-card .stat-ethnic-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.stat-card .eth-chip {
+  font-size: 11px;
+  background: var(--bg-blue);
+  color: var(--primary);
+  padding: 1px 6px;
+  border-radius: 4px;
+  white-space: nowrap;
 }
 
 /* 筛选栏 */
