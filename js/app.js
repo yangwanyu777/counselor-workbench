@@ -923,6 +923,7 @@ function renderStudentList(container) {
         <input type="text" class="input" id="searchInput" placeholder="搜索姓名/学号" style="min-width:160px" oninput="applyStudentFilter()">
         ${topFiltersHtml}
       </div>
+      <div id="filterResultBar" class="filter-result-bar">共 ${students.length} 名学生</div>
 
       <div id="studentPaginationTop" class="pagination pagination-left pagination-top"></div>
 
@@ -931,6 +932,7 @@ function renderStudentList(container) {
           <thead>
             <tr>
               <th style="width:36px"><input type="checkbox" id="selectAllCheckbox" onchange="toggleSelectAll(this)"></th>
+              <th style="width:48px">序号</th>
               ${columns.map(c => `<th>${getFieldDisplayName(c)}</th>`).join('')}
               <th>操作</th>
             </tr>
@@ -975,6 +977,12 @@ function applyStudentFilter() {
 
   state.currentPage = 1;
   renderStudentTable(state.filteredStudents);
+
+  // 更新筛选结果计数
+  const bar = document.getElementById('filterResultBar');
+  if (bar) {
+    bar.textContent = `当前筛选条件下共 ${state.filteredStudents.length} 名学生`;
+  }
 }
 
 function renderStudentTable(students) {
@@ -987,16 +995,18 @@ function renderStudentTable(students) {
   const totalPages = Math.ceil(students.length / state.pageSize);
 
   if (students.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="${columns.length + 2}"><div class="empty-state">
+    tbody.innerHTML = `<tr><td colspan="${columns.length + 3}"><div class="empty-state">
       <div class="empty-icon">📋</div>
       <div class="empty-text">暂无学生数据，请点击「导入Excel」或「手动添加」</div>
     </div></td></tr>`;
   } else {
-    tbody.innerHTML = pageData.map(s => {
+    tbody.innerHTML = pageData.map((s, idx) => {
+      const seq = start + idx + 1;
       const checked = state.selectedStudentIds.has(s.id) ? 'checked' : '';
       return `
       <tr class="row-clickable">
         <td onclick="event.stopPropagation()"><input type="checkbox" class="row-checkbox" data-id="${s.id}" onchange="toggleSelectStudent(${s.id}, this)" ${checked}></td>
+        <td class="row-seq">${seq}</td>
         ${columns.map(c => `<td onclick="showStudentDetail(${s.id})">${renderCellValue(c, s[c])}</td>`).join('')}
         <td onclick="event.stopPropagation()">
           <button class="btn btn-sm btn-outline" onclick="showEditStudentForm(${s.id})">编辑</button>
