@@ -1442,10 +1442,9 @@ function mapStudentRowDynamic(row) {
     result.studentId = normalizeStudentId(result.studentId);
   }
 
-  // 核心字段默认值
-  if (!result.ethnicity) result.ethnicity = '汉族';
-  if (!result.gradeLevel) result.gradeLevel = '本科';
-  if (!result.careerGoal) result.careerGoal = '暂未规划';
+  // 注意：不设置任何字段默认值（尤其是民族）。
+  // 之前的 ethnicity 默认'汉族'会在 Excel 缺民族列时把已有正确数据全部覆盖，属于严重 bug，已移除。
+  // 字段缺失时保留为空，展示为「未填写」，绝不覆盖已有数据。
 
   return result;
 }
@@ -1570,10 +1569,7 @@ async function saveStudentForm() {
     });
   }
 
-  // 默认值
-  if (!data.ethnicity) data.ethnicity = '汉族';
-  if (!data.gradeLevel) data.gradeLevel = '本科';
-  if (!data.careerGoal) data.careerGoal = '暂未规划';
+  // 不设置默认值：未填写的字段保留为空，展示「未填写」，保证数据真实
 
   if (state.editingStudentId) {
     const existing = await dbGet('students', state.editingStudentId);
