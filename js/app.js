@@ -2664,14 +2664,25 @@ async function handleGradeExcelImport(file) {
     const studentBySid = {};
     students.forEach(s => { studentBySid[normalizeStudentId(s.studentId)] = s; });
 
+    // 一次性拉取全部成绩并在内存建索引，避免循环内逐条查询（性能关键）
+    const allGrades = await dbGetAll('grades');
+    const gradesBySid = {};
+    allGrades.forEach(g => {
+      const sid = String(g.studentId);
+      if (!gradesBySid[sid]) gradesBySid[sid] = [];
+      gradesBySid[sid].push(g);
+    });
+
     let count = 0, unmatched = 0, updated = 0, added = 0;
+    const toAdd = [];
+    const toPut = [];
     for (const gradeData of Object.values(gradeMap)) {
       const student = studentBySid[gradeData.studentId];
       if (!student) { unmatched++; continue; }
 
-      // 检查是否已有该学期数据
-      const existing = await dbGetByIndex('grades', 'studentId', String(student.id));
-      const existSem = existing.find(g => g.semester === gradeData.semester);
+      // 在内存索引中查找是否已有该学期数据
+      const existList = gradesBySid[String(student.id)] || [];
+      const existSem = existList.find(g => g.semester === gradeData.semester);
       if (existSem) {
         // 合并课程：同名课程新数据覆盖，其余追加
         const existMap = {};
@@ -2679,7 +2690,7 @@ async function handleGradeExcelImport(file) {
         gradeData.courses.forEach(c => {
           existMap[c.name] = c; // 新数据覆盖
         });
-        await dbPut('grades', {
+        toPut.push({
           ...existSem,
           semester: gradeData.semester,
           studentId: String(student.id),
@@ -2689,7 +2700,7 @@ async function handleGradeExcelImport(file) {
         });
         updated++;
       } else {
-        await dbAdd('grades', {
+        toAdd.push({
           semester: gradeData.semester,
           studentId: String(student.id),
           courses: gradeData.courses,
@@ -2700,6 +2711,11 @@ async function handleGradeExcelImport(file) {
       }
       count++;
     }
+
+    // 批量写入：1 次读取 + 最多 2 次写入事务（替代原来每人 2 次 ≈ 288 次事务）
+    showLoading('正在保存成绩数据...');
+    if (toAdd.length) await dbAddBatch('grades', toAdd);
+    if (toPut.length) await dbPutBatch('grades', toPut);
 
     hideLoading();
     showToast(`导入完成：匹配 ${count} 人（新增 ${added} / 更新 ${updated}），${totalCourses} 门课程${unmatched > 0 ? `，${unmatched} 人未匹配` : ''}${skippedRows > 0 ? `，跳过 ${skippedRows} 行无效数据` : ''}`, 'success');

@@ -100,6 +100,22 @@ function dbAddBatch(storeName, dataList) {
   });
 }
 
+// 批量更新（单事务）
+function dbPutBatch(storeName, dataList) {
+  return new Promise((resolve, reject) => {
+    if (!dataList || dataList.length === 0) { resolve([]); return; }
+    const tx = db.transaction(storeName, 'readwrite');
+    const store = tx.objectStore(storeName);
+    const results = [];
+    dataList.forEach(data => {
+      const req = store.put(data);
+      req.onsuccess = () => results.push(req.result);
+    });
+    tx.oncomplete = () => { notifyDataChange(); resolve(results); };
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
 // 获取单条
 function dbGet(storeName, key) {
   return new Promise((resolve, reject) => {
