@@ -1684,15 +1684,38 @@ async function showStudentDetail(id) {
         <div style="font-weight:600;font-size:14px;margin-bottom:6px">${g.semester}</div>
         <div class="table-wrapper">
           <table class="data-table">
-            <thead><tr><th>课程名称</th><th>分数</th><th>学分</th><th>绩点</th></tr></thead>
+            <thead><tr><th>课程名称</th><th>课程性质</th><th>分数</th><th>学分</th><th>绩点</th><th>状态</th><th>操作</th></tr></thead>
             <tbody>
-              ${(g.courses||[]).map(c => `<tr><td>${c.name}</td><td>${c.score}</td><td>${c.credit||'-'}</td><td>${c.gpa||'-'}</td></tr>`).join('')}
+              ${(g.courses||[]).map(c => {
+                const failed = isCourseFailed(c);
+                const passTag = c.policyPass ? '<span class="tag tag-green">政策及格</span>' : (failed ? '<span class="tag tag-red">挂科</span>' : '<span class="tag tag-blue">及格</span>');
+                const policyBtn = failed ? `<button class="btn btn-sm btn-outline" onclick="toggleCoursePolicyPass(${id}, '${escapeHtml(g.semester)}', '${escapeHtml(c.name)}')">标为政策及格</button>` : '';
+                return `<tr><td>${c.name}</td><td>${c.courseType || '-'}</td><td>${c.score}</td><td>${c.credit||'-'}</td><td>${c.gpa||'-'}</td><td>${passTag}</td><td>${policyBtn}</td></tr>`;
+              }).join('')}
             </tbody>
           </table>
         </div>
       </div>
     `).join('') : '<div class="empty-state"><div class="empty-text">暂无课程成绩数据</div></div>'}
   `);
+}
+
+async function toggleCoursePolicyPass(studentId, semester, courseName) {
+  const grades = await dbGetByIndex('grades', 'studentId', String(studentId));
+  const g = grades.find(x => x.semester === semester);
+  if (!g) return;
+  const course = (g.courses || []).find(c => c.name === courseName);
+  if (!course) return;
+  course.policyPass = !course.policyPass;
+  await dbPut('grades', { ...g, courses: g.courses, updatedAt: Date.now() });
+  showToast(course.policyPass ? '已标记为政策及格' : '已取消政策及格标记', 'success');
+  showStudentDetail(studentId);
+  // 如果在成绩管理页，刷新统计面板
+  const panel = document.getElementById('gradeStatsPanel');
+  if (panel) {
+    const excludeNames = state.gradeExcludeCourses?.[semester] || [];
+    panel.outerHTML = renderGradeStatsPanel(semester, excludeNames);
+  }
 }
 
 function renderStudentInfoGroups(student) {
@@ -1741,15 +1764,26 @@ function renderStudentInfoGroups(student) {
   return html;
 }
 
-function calcWeightedAvg(courses) {
+function calcWeightedAvg(courses, opts = {}) {
   if (!courses || courses.length === 0) return null;
+  const excludeNames = opts.excludeNames || [];
   let totalScore = 0, totalCredit = 0;
   courses.forEach(c => {
+    if (excludeNames.includes(c.name)) return;
     const score = parseFloat(c.score);
     const credit = parseFloat(c.credit) || 1;
     if (!isNaN(score)) { totalScore += score * credit; totalCredit += credit; }
   });
   return totalCredit > 0 ? totalScore / totalCredit : null;
+}
+
+// 判断课程是否挂科（尊重政策及格）
+function isCourseFailed(c) {
+  if (c.policyPass) return false;
+  const score = parseFloat(c.score);
+  if (isNaN(score)) return false;
+  if (score >= 60) return false;
+  return true;
 }
 
 // 导出学生列表（全部）
@@ -2025,6 +2059,138 @@ async function saveFieldManager() {
   navigateTo('students');
 }
 
+// 成绩统计辅助函数
+function getGradeStudent(grade) {
+  return state.students.find(s => String(s.id) === String(grade.studentId));
+}
+
+function calcSemesterStats(semester, excludeNames = []) {
+  const semGrades = state.grades.filter(g => g.semester === semester);
+  const classStats = {};
+  const failedStudents = new Set();
+  const warningStudents = new Set();
+  const studentSet = new Set();
+
+  semGrades.forEach(g => {
+    const student = getGradeStudent(g);
+    if (!student) return;
+    studentSet.add(String(g.studentId));
+    const className = student.className || '未分班';
+    if (!classStats[className]) {
+      classStats[className] = { count: 0, totalScore: 0, totalCredit: 0 };
+    }
+    classStats[className].count++;
+
+    let failCount = 0;
+    (g.courses || []).forEach(c => {
+      if (excludeNames.includes(c.name)) return;
+      const score = parseFloat(c.score);
+      const credit = parseFloat(c.credit) || 1;
+      if (!isNaN(score)) {
+        classStats[className].totalScore += score * credit;
+        classStats[className].totalCredit += credit;
+      }
+      if (isCourseFailed(c)) failCount++;
+    });
+
+    if (failCount >= 1) failedStudents.add(String(g.studentId));
+    if (failCount >= 2) warningStudents.add(String(g.studentId));
+  });
+
+  const classAvgs = Object.entries(classStats).map(([className, s]) => ({
+    className,
+    count: s.count,
+    avg: s.totalCredit > 0 ? s.totalScore / s.totalCredit : null
+  })).sort((a, b) => (b.avg || 0) - (a.avg || 0));
+
+  return {
+    totalStudents: studentSet.size,
+    classAvgs,
+    failedCount: failedStudents.size,
+    warningCount: warningStudents.size
+  };
+}
+
+function renderGradeStatsPanel(semester, excludeNames = []) {
+  const stats = calcSemesterStats(semester, excludeNames);
+  const allCourses = [...new Set(state.grades.filter(g => g.semester === semester).flatMap(g => (g.courses || []).map(c => c.name)))].sort();
+
+  return `
+    <div class="grade-stats-panel" id="gradeStatsPanel">
+      <div class="grade-stats-header">
+        <select class="select" id="gradeStatsSemester" onchange="changeGradeStatsSemester()">
+          ${[...new Set(state.grades.map(g => g.semester))].sort().reverse().map(s => `<option value="${s}" ${s === semester ? 'selected' : ''}>${s}</option>`).join('')}
+        </select>
+        <button class="btn btn-outline" onclick="openExcludeCoursesModal('${semester}')">⚙️ 剔除课程</button>
+      </div>
+      <div class="grade-stats-grid">
+        <div class="grade-stat-card">
+          <div class="grade-stat-value">${stats.totalStudents}</div>
+          <div class="grade-stat-label">参与统计人数</div>
+        </div>
+        <div class="grade-stat-card warn-red">
+          <div class="grade-stat-value">${stats.failedCount}</div>
+          <div class="grade-stat-label">挂科人数</div>
+        </div>
+        <div class="grade-stat-card warn-orange">
+          <div class="grade-stat-value">${stats.warningCount}</div>
+          <div class="grade-stat-label">学业预警人数</div>
+        </div>
+      </div>
+      ${excludeNames.length > 0 ? `<div class="grade-exclude-tip">已剔除：${excludeNames.map(escapeHtml).join('、')}</div>` : ''}
+      <div class="grade-class-avg">
+        <div class="grade-class-avg-title">各班级加权平均分</div>
+        <div class="grade-class-avg-list">
+          ${stats.classAvgs.map(c => `
+            <div class="grade-class-avg-item">
+              <span class="grade-class-name">${escapeHtml(c.className)}</span>
+              <span class="grade-class-count">${c.count}人</span>
+              <span class="grade-class-score">${c.avg?.toFixed(2) || '-'}</span>
+            </div>
+          `).join('') || '<div class="empty-text">暂无班级数据</div>'}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function changeGradeStatsSemester() {
+  const semester = document.getElementById('gradeStatsSemester').value;
+  const excludeNames = state.gradeExcludeCourses?.[semester] || [];
+  const panel = document.getElementById('gradeStatsPanel');
+  if (panel) panel.outerHTML = renderGradeStatsPanel(semester, excludeNames);
+}
+
+function openExcludeCoursesModal(semester) {
+  const allCourses = [...new Set(state.grades.filter(g => g.semester === semester).flatMap(g => (g.courses || []).map(c => c.name)))].sort();
+  const selected = new Set(state.gradeExcludeCourses?.[semester] || []);
+  showModal('剔除课程（不参与统计）', `
+    <div style="max-height:320px;overflow-y:auto;padding:4px">
+      ${allCourses.map(c => `
+        <label style="display:flex;align-items:center;gap:8px;padding:6px 0;font-size:13px;cursor:pointer">
+          <input type="checkbox" value="${escapeHtml(c)}" class="exclude-course-cb" ${selected.has(c) ? 'checked' : ''}>
+          ${escapeHtml(c)}
+        </label>
+      `).join('') || '<div class="empty-text">暂无课程</div>'}
+    </div>
+  `, `
+    <button class="btn btn-outline" onclick="closeModal()">取消</button>
+    <button class="btn btn-primary" onclick="saveExcludeCourses('${semester}')">确定</button>
+  `);
+}
+
+function saveExcludeCourses(semester) {
+  const checked = [...document.querySelectorAll('.exclude-course-cb:checked')].map(cb => cb.value);
+  if (!state.gradeExcludeCourses) state.gradeExcludeCourses = {};
+  state.gradeExcludeCourses[semester] = checked;
+  closeModal();
+  const panel = document.getElementById('gradeStatsPanel');
+  if (panel) panel.outerHTML = renderGradeStatsPanel(semester, checked);
+  // 如果当前在排名页，同时刷新排名
+  if (document.getElementById('gradeRankBody')) updateGradeRanking();
+  showToast('已更新剔除课程，统计已重新计算', 'success');
+}
+
 // ---------- 学业成绩 ----------
 MODULE_RENDERERS.grades = async function(container) {
   state.grades = await dbGetAll('grades');
@@ -2033,6 +2199,8 @@ MODULE_RENDERERS.grades = async function(container) {
   const semesters = [...new Set(state.grades.map(g => g.semester))].sort().reverse();
   const studentMap = {};
   state.students.forEach(s => { studentMap[s.id] = s; });
+
+  const defaultSemester = semesters[0] || '';
 
   container.innerHTML = `
     <div class="card">
@@ -2046,6 +2214,8 @@ MODULE_RENDERERS.grades = async function(container) {
           <button class="btn btn-outline" onclick="exportGradeRanking()">📤 导出排名</button>
         </div>
       </div>
+
+      ${defaultSemester ? renderGradeStatsPanel(defaultSemester, state.gradeExcludeCourses?.[defaultSemester] || []) : ''}
 
       <div class="tabs" id="gradeTabs">
         <button class="tab active" onclick="switchGradeTab('ranking', this)">成绩排名</button>
@@ -2106,6 +2276,7 @@ function updateGradeRanking() {
   const semester = document.getElementById('gradeSemester').value;
   const scope = document.getElementById('gradeScope').value;
   const classFilter = document.getElementById('gradeClassFilter')?.value || '';
+  const excludeNames = state.gradeExcludeCourses?.[semester] || [];
 
   const semGrades = state.grades.filter(g => g.semester === semester);
   const studentMap = {};
@@ -2115,8 +2286,11 @@ function updateGradeRanking() {
     const student = studentMap[g.studentId];
     if (!student) return null;
     if (classFilter && student.className !== classFilter) return null;
-    const avg = calcWeightedAvg(g.courses);
-    const totalCredit = (g.courses||[]).reduce((sum, c) => sum + (parseFloat(c.credit)||0), 0);
+    if (scope === 'major' && document.getElementById('gradeMajorFilter')?.value) {
+      // 专业筛选（如需要可扩展）
+    }
+    const avg = calcWeightedAvg(g.courses, { excludeNames });
+    const totalCredit = (g.courses||[]).filter(c => !excludeNames.includes(c.name)).reduce((sum, c) => sum + (parseFloat(c.credit)||0), 0);
     return { student, avg, totalCredit };
   }).filter(Boolean);
 
@@ -2388,46 +2562,147 @@ async function handleGradeExcelImport(file) {
     const data = await readExcelFile(file);
     if (!data || data.length === 0) { hideLoading(); showToast('文件为空', 'error'); return; }
 
-    // 解析学期信息
-    const semester = await showPromptModal('成绩导入', '请输入本表学期', '如：2025-2026-1', '');
-    if (!semester) { hideLoading(); return; }
+    // 识别表头列名
+    const sample = data[0] || {};
+    const headers = {};
+    const headerKeys = Object.keys(sample);
 
-    // 按学号分组
-    const gradeMap = {};
-    data.forEach(row => {
-      const sid = String(row['学号'] || row['学 号'] || Object.values(row)[0] || '').trim();
-      if (!sid) return;
-      if (!gradeMap[sid]) gradeMap[sid] = { semester, studentId: sid, courses: [] };
-
-      const courseName = String(row['课程名称'] || row['课程'] || row['科目'] || '').trim();
-      const score = parseFloat(row['分数'] || row['成绩'] || row['得分'] || row['分数(百分制)']);
-      const credit = parseFloat(row['学分'] || row['学 分'] || '1');
-      const gpa = parseFloat(row['绩点'] || row['GPA'] || '');
-
-      if (courseName && !isNaN(score)) {
-        gradeMap[sid].courses.push({ name: courseName, score, credit: credit || 1, gpa: gpa || null });
+    function findHeader(names) {
+      for (const key of headerKeys) {
+        const cleaned = cleanColumnName(key);
+        if (names.includes(cleaned)) return key;
       }
+      return null;
+    }
+
+    headers.studentId = findHeader(['学号', '学生学号', '学籍号', '考号', '编号']);
+    headers.name = findHeader(['姓名', '学生姓名', '名字']);
+    headers.courseName = findHeader(['课程名称', '课程名', '课程', '科目']);
+    headers.score = findHeader(['总评成绩', '总评', '成绩', '分数', '得分', '分数(百分制)', '百分制成绩']);
+    headers.credit = findHeader(['学分', '学分数', '学分(分)']);
+    headers.gpa = findHeader(['绩点', '课程绩点', 'gpa']);
+    headers.courseType = findHeader(['课程性质', '性质', '课程类型', '类型', 'courseType']);
+    headers.semester = findHeader(['学期', '学期号', '学期名称', 'semester']);
+
+    if (!headers.studentId) { hideLoading(); showToast('未识别到「学号」列，请检查表头', 'error'); return; }
+    if (!headers.courseName) { hideLoading(); showToast('未识别到「课程名称」列，请检查表头', 'error'); return; }
+    if (!headers.score) {
+      // 没有总评成绩，尝试平时/期中/期末组合（截图中有平时、期中、期末列）
+      headers.regular = findHeader(['平时成绩', '平时', '平时分']);
+      headers.midterm = findHeader(['期中成绩', '期中', '期中分']);
+      headers.final = findHeader(['期末成绩', '期末', '期末分', '期末考试']);
+      if (!headers.regular && !headers.midterm && !headers.final) {
+        hideLoading(); showToast('未识别到成绩列（总评/平时/期中/期末），请检查表头', 'error'); return;
+      }
+    }
+
+    // 判断学期列是纯数字 1/2 还是完整学期名
+    let useSemesterPrompt = false;
+    let semesterBase = '';
+    if (headers.semester) {
+      const sampleSem = String(data.slice(0, 10).find(r => r[headers.semester])?.[headers.semester] || '');
+      const semNum = parseInt(sampleSem, 10);
+      if (String(semNum) === sampleSem.replace(/\s/g, '') && [1, 2].includes(semNum)) {
+        useSemesterPrompt = true;
+        const base = await showPromptModal('成绩导入', '检测到学期列为数字 1/2，请输入学年基准', '如：2025-2026', '');
+        if (!base) { hideLoading(); return; }
+        semesterBase = base.trim();
+      }
+    }
+
+    // 按学号+学期分组
+    const gradeMap = {};
+    let totalCourses = 0, skippedRows = 0;
+
+    data.forEach(row => {
+      const rawSid = row[headers.studentId] != null ? String(row[headers.studentId]) : '';
+      const sid = normalizeStudentId(rawSid);
+      if (!sid) { skippedRows++; return; }
+
+      const courseName = String(row[headers.courseName] || '').trim();
+      if (!courseName) { skippedRows++; return; }
+
+      let score = null;
+      if (headers.score) {
+        score = parseFloat(row[headers.score]);
+      } else {
+        // 组合成绩：优先总评，没有则按 平时30% + 期中30% + 期末40% 估算
+        const r = parseFloat(row[headers.regular]);
+        const m = parseFloat(row[headers.midterm]);
+        const f = parseFloat(row[headers.final]);
+        let est = 0, w = 0;
+        if (!isNaN(r)) { est += r * 0.3; w += 0.3; }
+        if (!isNaN(m)) { est += m * 0.3; w += 0.3; }
+        if (!isNaN(f)) { est += f * 0.4; w += 0.4; }
+        if (w > 0) score = Math.round(est / w);
+      }
+      if (score == null || isNaN(score)) { skippedRows++; return; }
+
+      const credit = parseFloat(row[headers.credit]) || 1;
+      const gpa = parseFloat(row[headers.gpa]);
+      const courseType = String(row[headers.courseType] || '').trim() || '其他';
+
+      let semester = '未命名学期';
+      if (headers.semester) {
+        const rawSem = String(row[headers.semester]).trim();
+        if (useSemesterPrompt && semesterBase) {
+          const semNum = parseInt(rawSem, 10);
+          semester = `${semesterBase}-${semNum}`;
+        } else if (rawSem) {
+          semester = rawSem;
+        }
+      }
+
+      const key = `${sid}__${semester}`;
+      if (!gradeMap[key]) gradeMap[key] = { semester, studentId: sid, courses: [] };
+      gradeMap[key].courses.push({ name: courseName, score, credit, gpa: isNaN(gpa) ? null : gpa, courseType, policyPass: false });
+      totalCourses++;
     });
 
     // 匹配学生并存储
     const students = await dbGetAll('students');
-    let count = 0, unmatched = 0;
-    for (const [sid, gradeData] of Object.entries(gradeMap)) {
-      const student = students.find(s => s.studentId === sid);
+    const studentBySid = {};
+    students.forEach(s => { studentBySid[normalizeStudentId(s.studentId)] = s; });
+
+    let count = 0, unmatched = 0, updated = 0, added = 0;
+    for (const gradeData of Object.values(gradeMap)) {
+      const student = studentBySid[gradeData.studentId];
       if (!student) { unmatched++; continue; }
+
       // 检查是否已有该学期数据
       const existing = await dbGetByIndex('grades', 'studentId', String(student.id));
-      const existSem = existing.find(g => g.semester === semester);
+      const existSem = existing.find(g => g.semester === gradeData.semester);
       if (existSem) {
-        await dbPut('grades', { ...existSem, ...gradeData, studentId: String(student.id), id: existSem.id });
+        // 合并课程：同名课程新数据覆盖，其余追加
+        const existMap = {};
+        (existSem.courses || []).forEach(c => { existMap[c.name] = c; });
+        gradeData.courses.forEach(c => {
+          existMap[c.name] = c; // 新数据覆盖
+        });
+        await dbPut('grades', {
+          ...existSem,
+          semester: gradeData.semester,
+          studentId: String(student.id),
+          courses: Object.values(existMap),
+          updatedAt: Date.now(),
+          id: existSem.id
+        });
+        updated++;
       } else {
-        await dbAdd('grades', { ...gradeData, studentId: String(student.id) });
+        await dbAdd('grades', {
+          semester: gradeData.semester,
+          studentId: String(student.id),
+          courses: gradeData.courses,
+          createdAt: Date.now(),
+          updatedAt: Date.now()
+        });
+        added++;
       }
       count++;
     }
 
     hideLoading();
-    showToast(`导入完成：${count} 人成绩已更新${unmatched > 0 ? `，${unmatched} 人未匹配到学生` : ''}`, 'success');
+    showToast(`导入完成：匹配 ${count} 人（新增 ${added} / 更新 ${updated}），${totalCourses} 门课程${unmatched > 0 ? `，${unmatched} 人未匹配` : ''}${skippedRows > 0 ? `，跳过 ${skippedRows} 行无效数据` : ''}`, 'success');
     state.grades = await dbGetAll('grades');
     navigateTo('grades');
   } catch (err) {
