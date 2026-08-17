@@ -13,6 +13,7 @@ const state = {
   currentPage: 1,
   pageSize: 20,
   filterConditions: {},
+  headerFilterConditions: {}, // 表头下拉筛选条件
   charts: {},
   editingStudentId: null,
   fileImportCallback: null,
@@ -887,28 +888,23 @@ function renderStudentList(container) {
   const students = state.students;
   const columns = state.studentListColumns.filter(c => !SYSTEM_FIELDS.includes(c));
 
-  // 动态生成筛选器：从字段配置中找出 filterable 且实际有值的字段
-  const filterableFields = state.studentFields.filter(f => {
-    if (SYSTEM_FIELDS.includes(f.key)) return false;
-    if (f.filterable === false) return false;
-    // 只生成选项不太多的字段（避免联系方式等变成筛选器）
-    const uniqueValues = [...new Set(students.map(s => s[f.key]).filter(Boolean))];
-    return uniqueValues.length > 0 && uniqueValues.length <= 50;
-  });
-
-  // 最多显示8个筛选器，优先显示默认常用字段
-  const priority = ['year', 'major', 'className', 'careerGoal', 'ethnicity', 'gradeLevel'];
-  filterableFields.sort((a, b) => {
-    const pa = priority.indexOf(a.key);
-    const pb = priority.indexOf(b.key);
-    if (pa !== -1 && pb !== -1) return pa - pb;
-    if (pa !== -1) return -1;
-    if (pb !== -1) return 1;
-    return a.name.localeCompare(b.name, 'zh-CN');
-  });
-  const displayFilters = filterableFields.slice(0, 8);
+  // 顶部固定筛选器：只保留搜索 + 学历层次 + 年级 + 专业 + 班级
+  const topFilterFields = ['gradeLevel', 'year', 'major', 'className'];
+  const topFiltersHtml = topFilterFields.map(key => {
+    const field = state.studentFields.find(f => f.key === key);
+    if (!field) return '';
+    const values = [...new Set(students.map(s => s[key]).filter(Boolean))].sort();
+    if (values.length === 0) return '';
+    return `
+      <select class="select student-filter" data-field="${key}" onchange="applyStudentFilter()">
+        <option value="">全部${field.name}</option>
+        ${values.map(v => `<option value="${escapeHtml(v)}">${escapeHtml(v)}</option>`).join('')}
+      </select>
+    `;
+  }).join('');
 
   container.innerHTML = `
+    ${renderStudentStats(students)}
     <div class="card">
       <div class="card-header" style="justify-content:flex-start;align-items:flex-start;gap:24px">
         <div style="display:flex;gap:8px;flex-wrap:wrap;flex-shrink:0">
@@ -926,30 +922,30 @@ function renderStudentList(container) {
 
       <div class="filter-bar" id="studentFilterBar">
         <input type="text" class="input" id="searchInput" placeholder="搜索姓名/学号" style="min-width:160px" oninput="applyStudentFilter()">
-        ${displayFilters.map(f => {
-          const values = [...new Set(students.map(s => s[f.key]).filter(Boolean))].sort();
-          return `
-            <select class="select student-filter" data-field="${f.key}" onchange="applyStudentFilter()">
-              <option value="">全部${f.name}</option>
-              ${values.map(v => `<option value="${escapeHtml(v)}">${escapeHtml(v)}</option>`).join('')}
-            </select>
-          `;
-        }).join('')}
+        ${topFiltersHtml}
       </div>
+
+      <div id="studentPaginationTop" class="pagination pagination-left pagination-top"></div>
 
       <div class="table-wrapper">
         <table class="data-table" id="studentTable">
           <thead>
             <tr>
               <th style="width:36px"><input type="checkbox" id="selectAllCheckbox" onchange="toggleSelectAll(this)"></th>
-              ${columns.map(c => `<th>${getFieldDisplayName(c)}</th>`).join('')}
+              ${columns.map(c => {
+                const isTopFilter = topFilterFields.includes(c);
+                const filterClass = isTopFilter ? '' : 'th-filter';
+                const filterClick = isTopFilter ? '' : `onclick="handleHeaderFilterClick(event, '${c}')"`;
+                const icon = isTopFilter ? '' : '<span class="th-filter-icon">▼</span>';
+                return `<th class="${filterClass}" data-field="${c}" ${filterClick}>${getFieldDisplayName(c)}${icon}</th>`;
+              }).join('')}
               <th>操作</th>
             </tr>
           </thead>
           <tbody id="studentTableBody"></tbody>
         </table>
       </div>
-      <div id="studentPagination" class="pagination"></div>
+      <div id="studentPaginationBottom" class="pagination pagination-left"></div>
     </div>
   `;
 
@@ -968,13 +964,16 @@ function escapeHtml(str) {
 function applyStudentFilter() {
   const search = (document.getElementById('searchInput')?.value || '').toLowerCase();
 
-  // 收集所有动态筛选条件
+  // 收集顶部固定筛选条件
   const filterConditions = {};
   document.querySelectorAll('.student-filter').forEach(sel => {
     const field = sel.dataset.field;
     const value = sel.value;
     if (value) filterConditions[field] = value;
   });
+
+  // 合并表头下拉筛选条件（表头筛选优先级更高，可覆盖顶部同名条件）
+  Object.assign(filterConditions, state.headerFilterConditions);
 
   state.filteredStudents = state.students.filter(s => {
     if (search && !(s.name?.toLowerCase().includes(search) || s.studentId?.includes(search))) return false;
@@ -1028,11 +1027,12 @@ function renderStudentTable(students) {
   // 更新导出选中按钮显示
   updateExportSelectedBtn();
 
-  // 分页（带跳页功能）
-  const pagEl = document.getElementById('studentPagination');
+  // 分页（带跳页功能）— 同时渲染上方和下方两个分页区域，均左对齐
+  const pagTop = document.getElementById('studentPaginationTop');
+  const pagBottom = document.getElementById('studentPaginationBottom');
+  let pagHtml = '';
   if (totalPages > 1) {
-    let html = '';
-    html += `<button onclick="changeStudentPage(${state.currentPage - 1})" ${state.currentPage <= 1 ? 'disabled' : ''}>上一页</button>`;
+    pagHtml += `<button onclick="changeStudentPage(${state.currentPage - 1})" ${state.currentPage <= 1 ? 'disabled' : ''}>上一页</button>`;
 
     // 智能页码显示：最多显示7个页码按钮
     const maxButtons = 7;
@@ -1047,26 +1047,25 @@ function renderStudentTable(students) {
     }
 
     if (startPage > 1) {
-      html += `<button class="1 === state.currentPage ? 'active' : ''" onclick="changeStudentPage(1)">1</button>`;
-      if (startPage > 2) html += `<span style="padding:0 4px;color:var(--text-muted)">…</span>`;
+      pagHtml += `<button class="${1 === state.currentPage ? 'active' : ''}" onclick="changeStudentPage(1)">1</button>`;
+      if (startPage > 2) pagHtml += `<span style="padding:0 4px;color:var(--text-muted)">…</span>`;
     }
 
     for (let i = startPage; i <= endPage; i++) {
-      html += `<button class="${i === state.currentPage ? 'active' : ''}" onclick="changeStudentPage(${i})">${i}</button>`;
+      pagHtml += `<button class="${i === state.currentPage ? 'active' : ''}" onclick="changeStudentPage(${i})">${i}</button>`;
     }
 
     if (endPage < totalPages) {
-      if (endPage < totalPages - 1) html += `<span style="padding:0 4px;color:var(--text-muted)">…</span>`;
-      html += `<button class="${totalPages === state.currentPage ? 'active' : ''}" onclick="changeStudentPage(${totalPages})">${totalPages}</button>`;
+      if (endPage < totalPages - 1) pagHtml += `<span style="padding:0 4px;color:var(--text-muted)">…</span>`;
+      pagHtml += `<button class="${totalPages === state.currentPage ? 'active' : ''}" onclick="changeStudentPage(${totalPages})">${totalPages}</button>`;
     }
 
-    html += `<button onclick="changeStudentPage(${state.currentPage + 1})" ${state.currentPage >= totalPages ? 'disabled' : ''}>下一页</button>`;
+    pagHtml += `<button onclick="changeStudentPage(${state.currentPage + 1})" ${state.currentPage >= totalPages ? 'disabled' : ''}>下一页</button>`;
     // 跳页输入框
-    html += `<span style="margin-left:8px;display:inline-flex;align-items:center;gap:4px;font-size:13px;color:var(--text-muted)">第<input type="number" min="1" max="${totalPages}" value="${state.currentPage}" style="width:50px;padding:2px 4px;border:1px solid var(--border);border-radius:4px;text-align:center" onchange="jumpToPage(this.value, ${totalPages})">页/共${totalPages}页</span>`;
-    pagEl.innerHTML = html;
-  } else {
-    pagEl.innerHTML = '';
+    pagHtml += `<span style="margin-left:8px;display:inline-flex;align-items:center;gap:4px;font-size:13px;color:var(--text-muted)">第<input type="number" min="1" max="${totalPages}" value="${state.currentPage}" style="width:50px;padding:2px 4px;border:1px solid var(--border);border-radius:4px;text-align:center" onchange="jumpToPage(this.value, ${totalPages})">页/共${totalPages}页</span>`;
   }
+  if (pagTop) pagTop.innerHTML = pagHtml;
+  if (pagBottom) pagBottom.innerHTML = pagHtml;
 }
 
 function jumpToPage(value, totalPages) {
@@ -1083,6 +1082,136 @@ function renderCellValue(fieldKey, value) {
   }
   if (fieldKey === 'careerGoal') return `<span class="tag tag-blue">${value}</span>`;
   return escapeHtml(value);
+}
+
+// ========== 学生统计面板 ==========
+function renderStudentStats(students) {
+  const stats = computeStudentStats(students);
+  return `
+    <div class="stat-grid stat-grid-3">
+      ${renderStatCard('本科生', stats.undergraduate, 'stat-blue', '🎓')}
+      ${renderStatCard('硕士研究生', stats.master, 'stat-green', '📚')}
+      ${renderStatCard('博士研究生', stats.doctor, 'stat-orange', '🔬')}
+    </div>
+  `;
+}
+
+function renderStatCard(label, stat, color, icon) {
+  if (!stat) return '';
+  const ethnicEntries = Object.entries(stat.ethnicities).sort((a, b) => b[1] - a[1]);
+  const ethnicTop3 = ethnicEntries.slice(0, 3).map(([k, v]) => `${k}${v}人`).join('、');
+  const ethnicMore = ethnicEntries.length > 3 ? `等${ethnicEntries.length}个民族` : '';
+  return `
+    <div class="stat-card ${color}">
+      <div class="stat-icon">${icon}</div>
+      <div class="stat-value">${stat.total}</div>
+      <div class="stat-label">在校${label}总数</div>
+      <div class="stat-detail">
+        <span>男 ${stat.male}</span><span>女 ${stat.female}</span>
+        <span>党员 ${stat.party}</span><span>团员 ${stat.league}</span><span>群众 ${stat.mass}</span>
+      </div>
+      ${ethnicTop3 ? `<div class="stat-ethnic">民族：${ethnicTop3}${ethnicMore}</div>` : ''}
+    </div>
+  `;
+}
+
+function computeStudentStats(students) {
+  const classifyLevel = (val) => {
+    const v = String(val || '').toLowerCase();
+    if (v.includes('博士')) return 'doctor';
+    if (v.includes('硕士')) return 'master';
+    if (v.includes('本科')) return 'undergraduate';
+    return null;
+  };
+
+  const classifyPolitical = (val) => {
+    const v = String(val || '');
+    if (v.includes('党员')) return 'party';
+    if (v.includes('团')) return 'league';
+    if (v === '群众') return 'mass';
+    return 'other';
+  };
+
+  const result = {
+    undergraduate: { total: 0, male: 0, female: 0, party: 0, league: 0, mass: 0, ethnicities: {} },
+    master: { total: 0, male: 0, female: 0, party: 0, league: 0, mass: 0, ethnicities: {} },
+    doctor: { total: 0, male: 0, female: 0, party: 0, league: 0, mass: 0, ethnicities: {} }
+  };
+
+  students.forEach(s => {
+    const level = classifyLevel(s.gradeLevel);
+    if (!level) return;
+    const stat = result[level];
+    stat.total++;
+
+    const gender = String(s.gender || '');
+    if (gender === '男') stat.male++;
+    else if (gender === '女') stat.female++;
+
+    const pol = classifyPolitical(s.politicalStatus);
+    if (pol === 'party') stat.party++;
+    else if (pol === 'league') stat.league++;
+    else if (pol === 'mass') stat.mass++;
+
+    const ethnic = String(s.ethnicity || '未填写');
+    stat.ethnicities[ethnic] = (stat.ethnicities[ethnic] || 0) + 1;
+  });
+
+  return result;
+}
+
+// ========== 表头下拉筛选（类似 WPS） ==========
+function handleHeaderFilterClick(event, field) {
+  // 只响应点击下拉图标
+  if (!event.target.classList.contains('th-filter-icon')) return;
+  event.stopPropagation();
+  showHeaderFilter(field, event.target);
+}
+
+function showHeaderFilter(field, iconEl) {
+  closeHeaderFilter();
+
+  const values = [...new Set(state.students.map(s => s[field]).filter(Boolean))].sort();
+  if (values.length === 0) return;
+
+  const currentValue = state.headerFilterConditions[field] || '';
+
+  const menu = document.createElement('div');
+  menu.id = 'headerFilterMenu';
+  menu.className = 'header-filter-menu';
+  menu.innerHTML = `
+    <div class="header-filter-item ${!currentValue ? 'active' : ''}" onclick="setHeaderFilter('${field}', '')">全部</div>
+    ${values.map(v => `
+      <div class="header-filter-item ${String(currentValue) === String(v) ? 'active' : ''}" onclick="setHeaderFilter('${field}', '${escapeHtml(v)}')">${escapeHtml(v)}</div>
+    `).join('')}
+  `;
+
+  const rect = iconEl.getBoundingClientRect();
+  menu.style.position = 'fixed';
+  menu.style.top = (rect.bottom + 4) + 'px';
+  menu.style.left = rect.left + 'px';
+  menu.style.zIndex = '10001';
+  document.body.appendChild(menu);
+
+  // 点击外部关闭
+  requestAnimationFrame(() => {
+    document.addEventListener('click', closeHeaderFilter, { once: true });
+  });
+}
+
+function closeHeaderFilter() {
+  const menu = document.getElementById('headerFilterMenu');
+  if (menu) menu.remove();
+}
+
+function setHeaderFilter(field, value) {
+  if (value) {
+    state.headerFilterConditions[field] = value;
+  } else {
+    delete state.headerFilterConditions[field];
+  }
+  closeHeaderFilter();
+  applyStudentFilter();
 }
 
 function changeStudentPage(page) {
