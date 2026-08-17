@@ -2219,7 +2219,6 @@ MODULE_RENDERERS.grades = async function(container) {
 
       <div class="tabs" id="gradeTabs">
         <button class="tab active" onclick="switchGradeTab('ranking', this)">成绩排名</button>
-        <button class="tab" onclick="switchGradeTab('analysis', this)">分布分析</button>
         <button class="tab" onclick="switchGradeTab('compare', this)">学业vs综测对比</button>
         <button class="tab" onclick="switchGradeTab('custom', this)">自定义排名</button>
       </div>
@@ -2234,7 +2233,6 @@ function switchGradeTab(tab, btn) {
   document.querySelectorAll('#gradeTabs .tab').forEach(t => t.classList.remove('active'));
   btn.classList.add('active');
   if (tab === 'ranking') renderGradeRanking();
-  else if (tab === 'analysis') renderGradeAnalysis();
   else if (tab === 'compare') renderGradeCompare();
   else if (tab === 'custom') renderCustomRanking();
 }
@@ -2482,18 +2480,27 @@ function renderCustomRanking() {
   container.innerHTML = `
     <div class="card" style="margin-bottom:12px;padding:16px">
       <div style="font-weight:700;margin-bottom:10px">自定义排名筛选条件</div>
-      <div class="filter-bar">
-        <select class="select" id="customSemester">
-          ${semesters.map(s => `<option value="${s}">${s}</option>`).join('')}
-        </select>
-        <select class="select" id="customMajor">
-          <option value="">全部专业</option>
-          ${[...new Set(state.students.map(s => s.major).filter(Boolean))].sort().map(m => `<option value="${m}">${m}</option>`).join('')}
-        </select>
-        <select class="select" id="customClass">
-          <option value="">全部班级</option>
-          ${[...new Set(state.students.map(s => s.className).filter(Boolean))].sort().map(c => `<option value="${c}">${c}</option>`).join('')}
-        </select>
+      <div class="filter-bar" style="align-items:flex-end;gap:12px">
+        <label style="display:flex;flex-direction:column;gap:4px;font-size:13px;color:var(--text-body);min-width:140px">
+          学期
+          <select class="select" id="customSemester">
+            ${semesters.map(s => `<option value="${s}">${s}</option>`).join('')}
+          </select>
+        </label>
+        <label style="display:flex;flex-direction:column;gap:4px;font-size:13px;color:var(--text-body);min-width:120px">
+          专业
+          <select class="select" id="customMajor">
+            <option value="">全部专业</option>
+            ${[...new Set(state.students.map(s => s.major).filter(Boolean))].sort().map(m => `<option value="${m}">${m}</option>`).join('')}
+          </select>
+        </label>
+        <label style="display:flex;flex-direction:column;gap:4px;font-size:13px;color:var(--text-body);min-width:120px">
+          班级
+          <select class="select" id="customClass">
+            <option value="">全部班级</option>
+            ${[...new Set(state.students.map(s => s.className).filter(Boolean))].sort().map(c => `<option value="${c}">${c}</option>`).join('')}
+          </select>
+        </label>
       </div>
       <div style="margin:10px 0">
         <label style="font-size:13px;font-weight:600;color:var(--text-body)">选择参与排名的课程（不选=全部课程）：</label>
@@ -2604,9 +2611,14 @@ async function handleGradeExcelImport(file) {
       const semNum = parseInt(sampleSem, 10);
       if (String(semNum) === sampleSem.replace(/\s/g, '') && [1, 2].includes(semNum)) {
         useSemesterPrompt = true;
-        const base = await showPromptModal('成绩导入', '检测到学期列为数字 1/2，请输入学年基准', '如：2025-2026', '');
+        const base = await showPromptModal('成绩导入', '检测到学期列为数字 1/2，请输入学年基准', '如：2025-2026', '2025-2026');
         if (!base) { hideLoading(); return; }
         semesterBase = base.trim();
+        if (!/^\d{4}-\d{4}$/.test(semesterBase)) {
+          hideLoading();
+          showToast('学年基准格式应为 2025-2026，请重新导入', 'error');
+          return;
+        }
       }
     }
 
