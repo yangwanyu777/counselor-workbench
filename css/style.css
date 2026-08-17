@@ -1247,3 +1247,98 @@ table.data-table tbody td.row-seq {
 
 .tab:hover { color: var(--text-body); }
 .tab.active { color: var(--primary); border-bottom-color: var(--primary); font-weight: 600; }
+
+/* 学业成绩统计面板 */
+.grade-stats-panel {
+  background: #fff;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: 14px 16px;
+  margin-bottom: 16px;
+}
+
+.grade-stats-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.grade-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.grade-stat-card {
+  background: var(--bg-light);
+  border-radius: var(--radius-md);
+  padding: 10px 12px;
+  text-align: center;
+  border-left: 3px solid var(--primary);
+}
+
+.grade-stat-card.warn-red { border-left-color: var(--danger); }
+.grade-stat-card.warn-orange { border-left-color: var(--warning); }
+
+.grade-stat-value {
+  font-size: 22px;
+  font-weight: 800;
+  color: var(--text-title);
+  line-height: 1.2;
+}
+
+.grade-stat-label {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+.grade-exclude-tip {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-bottom: 10px;
+  padding: 6px 10px;
+  background: #FEF3C7;
+  border-radius: var(--radius-sm);
+}
+
+.grade-class-avg {
+  margin-top: 10px;
+}
+
+.grade-class-avg-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-body);
+  margin-bottom: 8px;
+}
+
+.grade-class-avg-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 8px;
+}
+
+.grade-class-avg-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  background: var(--bg-light);
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+}
+
+.grade-class-name { color: var(--text-body); font-weight: 500; }
+.grade-class-count { color: var(--text-muted); font-size: 12px; }
+.grade-class-score { color: var(--primary); font-weight: 700; font-size: 14px; }
+
+@media (max-width: 640px) {
+  .grade-stats-grid { grid-template-columns: repeat(3, 1fr); }
+  .grade-class-avg-list { grid-template-columns: 1fr; }
+}
