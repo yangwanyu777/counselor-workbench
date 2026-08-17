@@ -467,26 +467,26 @@ table.data-table tbody tr.row-clickable { cursor: pointer; }
   box-shadow: var(--shadow-sm);
   border-left: 4px solid var(--primary);
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
+  flex-direction: column;
   min-width: 0;
+  overflow: hidden;
 }
 
 .stat-card .stat-main {
   display: flex;
   align-items: center;
-  gap: 10px;
-  flex-shrink: 0;
+  gap: 8px;
+  min-width: 0;
 }
 
 .stat-card .stat-icon {
-  font-size: 24px;
+  font-size: 20px;
   line-height: 1;
+  flex-shrink: 0;
 }
 
 .stat-card .stat-value {
-  font-size: 26px;
+  font-size: 22px;
   font-weight: 800;
   color: var(--text-title);
   line-height: 1.1;
@@ -495,7 +495,7 @@ table.data-table tbody tr.row-clickable { cursor: pointer; }
 .stat-card .stat-label {
   font-size: 12px;
   color: var(--text-muted);
-  margin-top: 2px;
+  margin-top: 1px;
   white-space: nowrap;
 }
 
@@ -512,11 +512,10 @@ table.data-table tbody tr.row-clickable { cursor: pointer; }
 .stat-card .stat-detail {
   display: flex;
   flex-wrap: wrap;
-  justify-content: flex-end;
   gap: 4px 6px;
+  margin-top: 8px;
   font-size: 11px;
   color: var(--text-body);
-  max-width: 55%;
 }
 
 .stat-card .stat-detail span {
@@ -530,6 +529,8 @@ table.data-table tbody tr.row-clickable { cursor: pointer; }
   background: transparent;
   padding: 0;
   color: var(--text-muted);
+  flex-basis: 100%;
+  white-space: normal;
 }
 
 /* 筛选栏 */
@@ -544,6 +545,19 @@ table.data-table tbody tr.row-clickable { cursor: pointer; }
 .filter-bar .input, .filter-bar .select {
   width: auto;
   min-width: 120px;
+}
+
+.filter-result-bar {
+  font-size: 13px;
+  color: var(--primary);
+  font-weight: 600;
+  margin-bottom: 12px;
+}
+
+table.data-table tbody td.row-seq {
+  color: var(--text-muted);
+  text-align: center;
+  font-variant-numeric: tabular-nums;
 }
 
 /* 标签 */
