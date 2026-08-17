@@ -547,6 +547,11 @@ table.data-table tbody tr.row-clickable { cursor: pointer; }
   white-space: nowrap;
 }
 
+.stat-card .eth-chip.class-chip {
+  background: var(--bg-success);
+  color: var(--success);
+}
+
 /* 筛选栏 */
 .filter-bar {
   display: flex;
@@ -1338,7 +1343,42 @@ table.data-table tbody td.row-seq {
 .grade-class-count { color: var(--text-muted); font-size: 12px; }
 .grade-class-score { color: var(--primary); font-weight: 700; font-size: 14px; }
 
+/* 剔除课程弹窗 */
+.exclude-section-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-body);
+  margin-bottom: 8px;
+}
+
+.exclude-check-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 4px 12px;
+}
+
+.exclude-check-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 5px 0;
+  font-size: 13px;
+  cursor: pointer;
+  color: var(--text-body);
+}
+
+.exclude-check-item input[type="checkbox"] {
+  margin-top: 2px;
+  flex-shrink: 0;
+}
+
+.exclude-check-item span {
+  line-height: 1.4;
+  word-break: break-all;
+}
+
 @media (max-width: 640px) {
   .grade-stats-grid { grid-template-columns: repeat(3, 1fr); }
   .grade-class-avg-list { grid-template-columns: 1fr; }
+  .exclude-check-list { grid-template-columns: 1fr; }
 }

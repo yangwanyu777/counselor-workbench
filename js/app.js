@@ -114,6 +114,11 @@ function normalizeStudentId(id) {
   return String(id).replace(/[\s\u00A0\u200B-\u200D\uFEFF]+/g, '').trim();
 }
 
+// 让出主线程，防止大数据量循环阻塞 UI
+function yieldToMain() {
+  return new Promise(resolve => setTimeout(resolve, 0));
+}
+
 // 清理列名（去除所有空白和不可见字符）
 function cleanColumnName(name) {
   return String(name ?? '')
@@ -1104,6 +1109,10 @@ function renderStatCard(label, stat, color, icon) {
   const ethnicChips = ethnicEntries.length
     ? ethnicEntries.map(([k, v]) => `<span class="eth-chip">${escapeHtml(k)} ${v}</span>`).join('')
     : '<span class="eth-chip">未填写</span>';
+  const classEntries = Object.entries(stat.classes).sort((a, b) => b[1] - a[1]);
+  const classChips = classEntries.length
+    ? classEntries.map(([k, v]) => `<span class="eth-chip class-chip">${escapeHtml(k)} ${v}</span>`).join('')
+    : '<span class="eth-chip">未分班</span>';
   return `
     <div class="stat-card ${color}">
       <div class="stat-main">
@@ -1120,6 +1129,10 @@ function renderStatCard(label, stat, color, icon) {
       <div class="stat-ethnic">
         <div class="stat-ethnic-title">各民族人数</div>
         <div class="stat-ethnic-chips">${ethnicChips}</div>
+      </div>
+      <div class="stat-ethnic">
+        <div class="stat-ethnic-title">各班级人数</div>
+        <div class="stat-ethnic-chips">${classChips}</div>
       </div>
     </div>
   `;
@@ -1143,9 +1156,9 @@ function computeStudentStats(students) {
   };
 
   const result = {
-    undergraduate: { total: 0, male: 0, female: 0, party: 0, league: 0, mass: 0, ethnicities: {} },
-    master: { total: 0, male: 0, female: 0, party: 0, league: 0, mass: 0, ethnicities: {} },
-    doctor: { total: 0, male: 0, female: 0, party: 0, league: 0, mass: 0, ethnicities: {} }
+    undergraduate: { total: 0, male: 0, female: 0, party: 0, league: 0, mass: 0, ethnicities: {}, classes: {} },
+    master: { total: 0, male: 0, female: 0, party: 0, league: 0, mass: 0, ethnicities: {}, classes: {} },
+    doctor: { total: 0, male: 0, female: 0, party: 0, league: 0, mass: 0, ethnicities: {}, classes: {} }
   };
 
   students.forEach(s => {
@@ -1165,6 +1178,9 @@ function computeStudentStats(students) {
 
     const ethnic = String(s.ethnicity || '未填写');
     stat.ethnicities[ethnic] = (stat.ethnicities[ethnic] || 0) + 1;
+
+    const className = String(s.className || '未分班').trim();
+    stat.classes[className] = (stat.classes[className] || 0) + 1;
   });
 
   return result;
@@ -1764,12 +1780,29 @@ function renderStudentInfoGroups(student) {
   return html;
 }
 
+function parseExcludeRules(excludeNames = []) {
+  const nameSet = new Set();
+  const typeSet = new Set();
+  excludeNames.forEach(x => {
+    const s = String(x);
+    if (s.startsWith('TYPE:')) typeSet.add(s.slice(5));
+    else nameSet.add(s);
+  });
+  return { nameSet, typeSet };
+}
+
+function isCourseExcluded(c, nameSet, typeSet) {
+  if (nameSet && nameSet.has(c.name)) return true;
+  if (typeSet && typeSet.has(c.courseType || '其他')) return true;
+  return false;
+}
+
 function calcWeightedAvg(courses, opts = {}) {
   if (!courses || courses.length === 0) return null;
-  const excludeNames = opts.excludeNames || [];
+  const { nameSet, typeSet } = parseExcludeRules(opts.excludeNames);
   let totalScore = 0, totalCredit = 0;
   courses.forEach(c => {
-    if (excludeNames.includes(c.name)) return;
+    if (isCourseExcluded(c, nameSet, typeSet)) return;
     const score = parseFloat(c.score);
     const credit = parseFloat(c.credit) || 1;
     if (!isNaN(score)) { totalScore += score * credit; totalCredit += credit; }
@@ -2070,6 +2103,7 @@ function calcSemesterStats(semester, excludeNames = []) {
   const failedStudents = new Set();
   const warningStudents = new Set();
   const studentSet = new Set();
+  const { nameSet, typeSet } = parseExcludeRules(excludeNames);
 
   semGrades.forEach(g => {
     const student = getGradeStudent(g);
@@ -2083,7 +2117,7 @@ function calcSemesterStats(semester, excludeNames = []) {
 
     let failCount = 0;
     (g.courses || []).forEach(c => {
-      if (excludeNames.includes(c.name)) return;
+      if (isCourseExcluded(c, nameSet, typeSet)) return;
       const score = parseFloat(c.score);
       const credit = parseFloat(c.credit) || 1;
       if (!isNaN(score)) {
@@ -2162,16 +2196,39 @@ function changeGradeStatsSemester() {
 }
 
 function openExcludeCoursesModal(semester) {
-  const allCourses = [...new Set(state.grades.filter(g => g.semester === semester).flatMap(g => (g.courses || []).map(c => c.name)))].sort();
+  const semesterGrades = state.grades.filter(g => g.semester === semester);
+  const allCourses = [...new Set(semesterGrades.flatMap(g => (g.courses || []).map(c => c.name)))].sort();
+  const allTypes = [...new Set(semesterGrades.flatMap(g => (g.courses || []).map(c => c.courseType || '其他')))].sort();
   const selected = new Set(state.gradeExcludeCourses?.[semester] || []);
-  showModal('剔除课程（不参与统计）', `
-    <div style="max-height:320px;overflow-y:auto;padding:4px">
-      ${allCourses.map(c => `
-        <label style="display:flex;align-items:center;gap:8px;padding:6px 0;font-size:13px;cursor:pointer">
+
+  const courseListHtml = allCourses.length
+    ? allCourses.map(c => `
+        <label class="exclude-check-item">
           <input type="checkbox" value="${escapeHtml(c)}" class="exclude-course-cb" ${selected.has(c) ? 'checked' : ''}>
-          ${escapeHtml(c)}
+          <span>${escapeHtml(c)}</span>
         </label>
-      `).join('') || '<div class="empty-text">暂无课程</div>'}
+      `).join('')
+    : '<div class="empty-text">本学期暂无课程名称数据</div>';
+
+  const typeListHtml = allTypes.length
+    ? allTypes.map(t => `
+        <label class="exclude-check-item">
+          <input type="checkbox" value="TYPE:${escapeHtml(t)}" class="exclude-course-type-cb" ${selected.has(`TYPE:${t}`) ? 'checked' : ''}>
+          <span>${escapeHtml(t)}</span>
+        </label>
+      `).join('')
+    : '<div class="empty-text">本学期暂无课程类型数据</div>';
+
+  showModal('剔除课程（不参与统计）', `
+    <div style="max-height:420px;overflow-y:auto;padding:4px">
+      <div class="exclude-section">
+        <div class="exclude-section-title">按课程名称剔除</div>
+        <div class="exclude-check-list">${courseListHtml}</div>
+      </div>
+      <div class="exclude-section" style="margin-top:12px">
+        <div class="exclude-section-title">按课程类型剔除</div>
+        <div class="exclude-check-list">${typeListHtml}</div>
+      </div>
     </div>
   `, `
     <button class="btn btn-outline" onclick="closeModal()">取消</button>
@@ -2180,7 +2237,9 @@ function openExcludeCoursesModal(semester) {
 }
 
 function saveExcludeCourses(semester) {
-  const checked = [...document.querySelectorAll('.exclude-course-cb:checked')].map(cb => cb.value);
+  const courseNames = [...document.querySelectorAll('.exclude-course-cb:checked')].map(cb => cb.value);
+  const courseTypes = [...document.querySelectorAll('.exclude-course-type-cb:checked')].map(cb => cb.value);
+  const checked = [...courseNames, ...courseTypes];
   if (!state.gradeExcludeCourses) state.gradeExcludeCourses = {};
   state.gradeExcludeCourses[semester] = checked;
   closeModal();
@@ -2275,6 +2334,7 @@ function updateGradeRanking() {
   const scope = document.getElementById('gradeScope').value;
   const classFilter = document.getElementById('gradeClassFilter')?.value || '';
   const excludeNames = state.gradeExcludeCourses?.[semester] || [];
+  const { nameSet, typeSet } = parseExcludeRules(excludeNames);
 
   const semGrades = state.grades.filter(g => g.semester === semester);
   const studentMap = {};
@@ -2288,7 +2348,7 @@ function updateGradeRanking() {
       // 专业筛选（如需要可扩展）
     }
     const avg = calcWeightedAvg(g.courses, { excludeNames });
-    const totalCredit = (g.courses||[]).filter(c => !excludeNames.includes(c.name)).reduce((sum, c) => sum + (parseFloat(c.credit)||0), 0);
+    const totalCredit = (g.courses||[]).filter(c => !isCourseExcluded(c, nameSet, typeSet)).reduce((sum, c) => sum + (parseFloat(c.credit)||0), 0);
     return { student, avg, totalCredit };
   }).filter(Boolean);
 
@@ -2611,6 +2671,7 @@ async function handleGradeExcelImport(file) {
       const semNum = parseInt(sampleSem, 10);
       if (String(semNum) === sampleSem.replace(/\s/g, '') && [1, 2].includes(semNum)) {
         useSemesterPrompt = true;
+        hideLoading(); // 先关闭 loading，避免遮住输入弹窗
         const base = await showPromptModal('成绩导入', '检测到学期列为数字 1/2，请输入学年基准', '如：2025-2026', '2025-2026');
         if (!base) { hideLoading(); return; }
         semesterBase = base.trim();
@@ -2619,20 +2680,22 @@ async function handleGradeExcelImport(file) {
           showToast('学年基准格式应为 2025-2026，请重新导入', 'error');
           return;
         }
+        showLoading('正在解析成绩Excel...');
       }
     }
 
-    // 按学号+学期分组
+    // 按学号+学期分组（分片循环，避免大数据量阻塞 UI）
     const gradeMap = {};
     let totalCourses = 0, skippedRows = 0;
 
-    data.forEach(row => {
+    for (let i = 0; i < data.length; i++) {
+      const row = data[i];
       const rawSid = row[headers.studentId] != null ? String(row[headers.studentId]) : '';
       const sid = normalizeStudentId(rawSid);
-      if (!sid) { skippedRows++; return; }
+      if (!sid) { skippedRows++; continue; }
 
       const courseName = String(row[headers.courseName] || '').trim();
-      if (!courseName) { skippedRows++; return; }
+      if (!courseName) { skippedRows++; continue; }
 
       let score = null;
       if (headers.score) {
@@ -2648,7 +2711,7 @@ async function handleGradeExcelImport(file) {
         if (!isNaN(f)) { est += f * 0.4; w += 0.4; }
         if (w > 0) score = Math.round(est / w);
       }
-      if (score == null || isNaN(score)) { skippedRows++; return; }
+      if (score == null || isNaN(score)) { skippedRows++; continue; }
 
       const credit = parseFloat(row[headers.credit]) || 1;
       const gpa = parseFloat(row[headers.gpa]);
@@ -2669,7 +2732,10 @@ async function handleGradeExcelImport(file) {
       if (!gradeMap[key]) gradeMap[key] = { semester, studentId: sid, courses: [] };
       gradeMap[key].courses.push({ name: courseName, score, credit, gpa: isNaN(gpa) ? null : gpa, courseType, policyPass: false });
       totalCourses++;
-    });
+
+      // 每处理 200 行让出一次主线程，保证 loading 动画和弹窗不被卡死
+      if (i % 200 === 199) await yieldToMain();
+    }
 
     // 匹配学生并存储
     const students = await dbGetAll('students');
