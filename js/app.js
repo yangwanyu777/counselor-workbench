@@ -131,6 +131,7 @@ function columnToFieldKey(columnName) {
   // 1. 先检查精确规则匹配（最具体，如"父亲联系方式"优先于"联系方式"）
   const rules = [
     [/^(学号|考号|编号|学籍号)$/, 'studentId'],
+    [/学号|学籍|考号|考生号|编号/i, 'studentId'],
     [/^(姓名|学生姓名|名字)$/, 'name'],
     [/^(性别|男女)$/, 'gender'],
     [/^(民族|族别)$/, 'ethnicity'],
@@ -912,6 +913,7 @@ function renderStudentList(container) {
           <button class="btn btn-outline" onclick="showFieldManager()">⚙️ 调整字段</button>
           <button class="btn btn-outline" onclick="exportStudentsList()">📤 导出全部</button>
           <button class="btn btn-outline" onclick="exportSelectedStudents()" id="exportSelectedBtn" style="display:none">📤 导出选中</button>
+          <button class="btn btn-outline" onclick="fixStudentData()" title="合并重复学号/姓名的数据">🔧 修复重复</button>
         </div>
         <div>
           <div class="card-title">学生数据管理</div>
@@ -1088,7 +1090,7 @@ function renderCellValue(fieldKey, value) {
 function renderStudentStats(students) {
   const stats = computeStudentStats(students);
   return `
-    <div class="stat-grid stat-grid-3">
+    <div class="stat-grid">
       ${renderStatCard('本科生', stats.undergraduate, 'stat-blue', '🎓')}
       ${renderStatCard('硕士研究生', stats.master, 'stat-green', '📚')}
       ${renderStatCard('博士研究生', stats.doctor, 'stat-orange', '🔬')}
@@ -1099,8 +1101,9 @@ function renderStudentStats(students) {
 function renderStatCard(label, stat, color, icon) {
   if (!stat) return '';
   const ethnicEntries = Object.entries(stat.ethnicities).sort((a, b) => b[1] - a[1]);
-  const ethnicTop3 = ethnicEntries.slice(0, 2).map(([k, v]) => `${k}${v}`).join('、');
-  const ethnicMore = ethnicEntries.length > 2 ? ` 等${ethnicEntries.length}个民族` : '';
+  const ethnicChips = ethnicEntries.length
+    ? ethnicEntries.map(([k, v]) => `<span class="eth-chip">${escapeHtml(k)} ${v}</span>`).join('')
+    : '<span class="eth-chip">未填写</span>';
   return `
     <div class="stat-card ${color}">
       <div class="stat-main">
@@ -1111,9 +1114,12 @@ function renderStatCard(label, stat, color, icon) {
         </div>
       </div>
       <div class="stat-detail">
-        <span>男${stat.male}</span><span>女${stat.female}</span>
-        <span>党员${stat.party}</span><span>团员${stat.league}</span><span>群众${stat.mass}</span>
-        ${ethnicTop3 ? `<span class="stat-ethnic-span">民族 ${ethnicTop3}${ethnicMore}</span>` : ''}
+        <span>男 ${stat.male}</span><span>女 ${stat.female}</span>
+        <span>党员 ${stat.party}</span><span>团员 ${stat.league}</span><span>群众 ${stat.mass}</span>
+      </div>
+      <div class="stat-ethnic">
+        <div class="stat-ethnic-title">各民族人数</div>
+        <div class="stat-ethnic-chips">${ethnicChips}</div>
       </div>
     </div>
   `;
@@ -1188,6 +1194,74 @@ document.getElementById('fileInput').addEventListener('change', async (e) => {
   e.target.value = '';
 });
 
+// 修复/合并重复数据：按学号合并，学号缺失时按姓名合并
+async function fixStudentData() {
+  if (!confirm('将按「学号 → 姓名」合并重复的学生记录，重复项会被删除、字段会合并。确定继续？')) return;
+  showLoading('正在修复重复数据...');
+  try {
+    const all = await dbGetAll('students');
+    const before = all.length;
+    if (before === 0) { hideLoading(); showToast('暂无学生数据', 'error'); return; }
+
+    // 1) 按学号分组
+    const byId = new Map();
+    const noId = [];
+    all.forEach(s => {
+      const sid = normalizeStudentId(s.studentId);
+      if (sid) { if (!byId.has(sid)) byId.set(sid, []); byId.get(sid).push(s); }
+      else noId.push(s);
+    });
+
+    const keepers = [];
+    const nameIndex = new Map();
+    const mergeInto = (keeper, dup) => {
+      Object.keys(dup).forEach(k => {
+        if (SYSTEM_FIELDS.includes(k) || k === 'studentId') return;
+        const v = dup[k];
+        if (v !== '' && v != null && !keeper[k]) keeper[k] = v;
+      });
+    };
+
+    // 2) 合并同学号的多条记录
+    for (const [, list] of byId) {
+      list.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+      const keeper = list[0];
+      for (let i = 1; i < list.length; i++) mergeInto(keeper, list[i]);
+      keepers.push(keeper);
+      const nm = String(keeper.name || '').trim();
+      if (nm && !nameIndex.has(nm)) nameIndex.set(nm, keeper);
+    }
+
+    // 3) 无学号记录：按姓名并入已有 keeper，否则独立保留
+    for (const s of noId) {
+      const nm = String(s.name || '').trim();
+      if (nm && nameIndex.has(nm)) {
+        mergeInto(nameIndex.get(nm), s);
+      } else {
+        keepers.push(s);
+        if (nm && !nameIndex.has(nm)) nameIndex.set(nm, s);
+      }
+    }
+
+    // 4) 写回：删除被合并掉的记录
+    const keeperIds = new Set(keepers.map(k => k.id));
+    const toDelete = all.filter(s => !keeperIds.has(s.id));
+    for (const d of toDelete) await dbDelete('students', d.id);
+    for (const k of keepers) { k.updatedAt = k.updatedAt || Date.now(); await dbPut('students', k); }
+
+    const after = keepers.length;
+    state.students = keepers;
+    await syncStudentFields(keepers);
+    hideLoading();
+    showToast(`数据修复完成：合并前 ${before} 条 → 合并后 ${after} 条，已移除 ${before - after} 条重复`, 'success');
+    navigateTo('students');
+  } catch (e) {
+    hideLoading();
+    console.error(e);
+    showToast('修复失败：' + e.message, 'error');
+  }
+}
+
 async function handleStudentExcelImport(file) {
   showLoading('正在解析Excel文件...');
   try {
@@ -1250,13 +1324,24 @@ async function handleStudentExcelImport(file) {
       }
     }
 
+    // 建立姓名索引（用于学号缺失时按姓名匹配）
+    const existingByName = {};
+    Object.values(existingById).forEach(s => {
+      const nm = String(s.name || '').trim();
+      if (nm && !existingByName[nm]) existingByName[nm] = s;
+    });
+
     let newCount = 0, updateCount = 0;
 
     for (const student of valid) {
       const sid = normalizeStudentId(student.studentId);
-      const exist = existingById[sid];
-      if (exist && sid) {
-        // 深合并：保留旧数据，新数据覆盖同名字段，新增字段追加
+      const nm = String(student.name || '').trim();
+      // 优先按学号匹配，学号缺失时按姓名匹配
+      let exist = (sid && existingById[sid]) || null;
+      if (!exist && nm) exist = existingByName[nm] || null;
+
+      if (exist) {
+        // 深合并：新数据覆盖同名字段（含 ethnicity 等），新增字段追加
         const merged = { ...exist };
         Object.keys(student).forEach(key => {
           if (SYSTEM_FIELDS.includes(key)) return;
@@ -1267,14 +1352,16 @@ async function handleStudentExcelImport(file) {
         });
         merged.updatedAt = Date.now();
         await dbPut('students', merged);
-        existingById[sid] = merged;
+        if (sid) existingById[sid] = merged;
+        if (nm) existingByName[nm] = merged;
         updateCount++;
       } else {
         student.createdAt = Date.now();
         student.updatedAt = Date.now();
-        student.studentId = sid || student.studentId;
+        if (sid) student.studentId = sid;
         await dbAdd('students', student);
         if (sid) existingById[sid] = student;
+        if (nm) existingByName[nm] = student;
         newCount++;
       }
     }
