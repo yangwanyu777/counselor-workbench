@@ -1622,60 +1622,33 @@ async function deleteStudent(id) {
 async function showStudentDetail(id) {
   const student = await dbGet('students', id);
   if (!student) return;
-  const grades = await dbGetByIndex('grades', 'studentId', String(id));
-  const assessments = await dbGetByIndex('assessments', 'studentId', String(id));
+  const grades = (await dbGetByIndex('grades', 'studentId', String(id))).filter(g => g && typeof g.weightedScore === 'number');
+  const allAssess = await dbGetAll('assessments');
+  const assessments = allAssess.filter(a => String(a.studentId) === String(id));
 
-  // 计算排名
-  const allStudents = await dbGetAll('students');
-  const classMates = allStudents.filter(s => s.className === student.className);
+  // 综测每学年排名
+  const yearGroups = {};
+  allAssess.forEach(a => { (yearGroups[a.academicYear] = yearGroups[a.academicYear] || []).push(a); });
+  const assessRankMap = {};
+  Object.keys(yearGroups).forEach(y => {
+    const arr = yearGroups[y].slice().sort((x, yy) => (yy.totalScore || 0) - (x.totalScore || 0));
+    arr.forEach((a, i) => { assessRankMap[String(a.studentId) + '_' + y] = i + 1; });
+  });
+  const assessmentRanks = assessments.map(a => ({ year: a.academicYear, score: a.totalScore, rank: assessRankMap[String(id) + '_' + a.academicYear] })).sort((a, b) => b.year.localeCompare(a.year));
 
-  // 学业排名
-  const academicRanks = [];
-  for (const g of grades) {
-    const semGrades = await dbGetByIndex('grades', 'semester', g.semester);
-    const classGrades = [];
-    for (const sg of semGrades) {
-      const s = allStudents.find(x => x.id == sg.studentId);
-      if (s && s.className === student.className) {
-        const avg = calcWeightedAvg(sg.courses);
-        if (avg) classGrades.push({ studentId: sg.studentId, avg });
-      }
-    }
-    classGrades.sort((a, b) => b.avg - a.avg);
-    const rank = classGrades.findIndex(x => x.studentId == String(id)) + 1;
-    const myAvg = calcWeightedAvg(g.courses);
-    academicRanks.push({ semester: g.semester, avg: myAvg, rank, total: classGrades.length });
-  }
-  academicRanks.sort((a, b) => a.semester.localeCompare(b.semester));
-
-  // 综测排名
-  const assessmentRanks = [];
-  for (const a of assessments) {
-    const yearAssessments = await dbGetByIndex('assessments', 'academicYear', a.academicYear);
-    const classAssess = [];
-    for (const ya of yearAssessments) {
-      const s = allStudents.find(x => x.id == ya.studentId);
-      if (s && s.className === student.className) {
-        classAssess.push({ studentId: ya.studentId, score: ya.totalScore });
-      }
-    }
-    classAssess.sort((a, b) => b.score - a.score);
-    const rank = classAssess.findIndex(x => x.studentId == String(id)) + 1;
-    assessmentRanks.push({ year: a.academicYear, score: a.totalScore, rank, total: classAssess.length });
-  }
-  assessmentRanks.sort((a, b) => b.year.localeCompare(a.year));
+  // 学业排名（已存 overallRank）
+  const academicRanks = grades.map(g => ({ semester: g.semester, score: g.weightedScore, rank: g.overallRank })).sort((a, b) => a.semester.localeCompare(b.semester));
 
   showModal(`${student.name} - 学生详情`, `
     ${renderStudentInfoGroups(student)}
 
     <div class="section-title">📊 学业排名（按学期）</div>
     ${academicRanks.length > 0 ? `
-      <div class="chart-container" style="margin-bottom:12px"><canvas id="detailAcademicChart"></canvas></div>
       <div class="table-wrapper">
         <table class="data-table">
-          <thead><tr><th>学期</th><th>加权平均分</th><th>班级排名</th><th>班级总人数</th></tr></thead>
+          <thead><tr><th>学期</th><th>加权总分</th><th>排名</th></tr></thead>
           <tbody>
-            ${academicRanks.map(r => `<tr><td>${r.semester}</td><td>${r.avg?.toFixed(2)||'-'}</td><td><span class="tag ${r.rank<=3?'tag-red':'tag-blue'}">${r.rank}</span></td><td>${r.total}</td></tr>`).join('')}
+            ${academicRanks.map(r => `<tr><td>${r.semester}</td><td>${r.score != null ? r.score.toFixed(2) : '-'}</td><td><span class="tag ${r.rank && r.rank <= 3 ? 'tag-red' : 'tag-blue'}">${r.rank != null ? r.rank : '-'}</span></td></tr>`).join('')}
           </tbody>
         </table>
       </div>
@@ -1685,36 +1658,15 @@ async function showStudentDetail(id) {
     ${assessmentRanks.length > 0 ? `
       <div class="table-wrapper">
         <table class="data-table">
-          <thead><tr><th>学年</th><th>综测总分</th><th>班级排名</th><th>班级总人数</th></tr></thead>
+          <thead><tr><th>学年</th><th>综测总分</th><th>排名</th></tr></thead>
           <tbody>
-            ${assessmentRanks.map(r => `<tr><td>${r.year}</td><td>${r.score?.toFixed(2)||'-'}</td><td><span class="tag ${r.rank<=3?'tag-red':'tag-blue'}">${r.rank}</span></td><td>${r.total}</td></tr>`).join('')}
+            ${assessmentRanks.map(r => `<tr><td>${r.year}</td><td>${r.score != null ? r.score.toFixed(2) : '-'}</td><td><span class="tag ${r.rank && r.rank <= 3 ? 'tag-red' : 'tag-blue'}">${r.rank != null ? r.rank : '-'}</span></td></tr>`).join('')}
           </tbody>
         </table>
       </div>
     ` : '<div class="empty-state"><div class="empty-text">暂无综测数据</div></div>'}
-
-    <div class="section-title">📚 各学期课程成绩</div>
-    ${grades.length > 0 ? grades.map(g => `
-      <div style="margin-bottom:12px">
-        <div style="font-weight:600;font-size:14px;margin-bottom:6px">${g.semester}</div>
-        <div class="table-wrapper">
-          <table class="data-table">
-            <thead><tr><th>课程名称</th><th>课程性质</th><th>分数</th><th>学分</th><th>绩点</th><th>状态</th><th>操作</th></tr></thead>
-            <tbody>
-              ${(g.courses||[]).map(c => {
-                const failed = isCourseFailed(c);
-                const passTag = c.policyPass ? '<span class="tag tag-green">政策及格</span>' : (failed ? '<span class="tag tag-red">挂科</span>' : '<span class="tag tag-blue">及格</span>');
-                const policyBtn = failed ? `<button class="btn btn-sm btn-outline" onclick="toggleCoursePolicyPass(${id}, '${escapeHtml(g.semester)}', '${escapeHtml(c.name)}')">标为政策及格</button>` : '';
-                return `<tr><td>${c.name}</td><td>${c.courseType || '-'}</td><td>${c.score}</td><td>${c.credit||'-'}</td><td>${c.gpa||'-'}</td><td>${passTag}</td><td>${policyBtn}</td></tr>`;
-              }).join('')}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    `).join('') : '<div class="empty-state"><div class="empty-text">暂无课程成绩数据</div></div>'}
   `);
 }
-
 async function toggleCoursePolicyPass(studentId, semester, courseName) {
   const grades = await dbGetByIndex('grades', 'studentId', String(studentId));
   const g = grades.find(x => x.semester === semester);
@@ -2250,37 +2202,30 @@ function saveExcludeCourses(semester) {
 }
 
 // ---------- 学业成绩 ----------
+// ---------- 学业成绩（排名制） ----------
 MODULE_RENDERERS.grades = async function(container) {
-  state.grades = await dbGetAll('grades');
+  state.grades = (await dbGetAll('grades')).filter(g => g && typeof g.weightedScore === 'number');
   state.students = await dbGetAll('students');
+  state.assessments = await dbGetAll('assessments');
 
-  const semesters = [...new Set(state.grades.map(g => g.semester))].sort().reverse();
-  const studentMap = {};
-  state.students.forEach(s => { studentMap[s.id] = s; });
-
-  const defaultSemester = semesters[0] || '';
-
+  const semesters = [...new Set(state.grades.map(g => g.semester))].sort();
   container.innerHTML = `
     <div class="card">
       <div class="card-header">
         <div>
-          <div class="card-title">学业成绩管理</div>
-          <div class="card-subtitle">${state.grades.length} 条成绩记录 · ${semesters.length} 个学期</div>
+          <div class="card-title">学业成绩 · 排名管理</div>
+          <div class="card-subtitle">${state.grades.length} 条排名记录 · ${semesters.length} 个学期</div>
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap">
-          <button class="btn btn-primary" onclick="triggerGradeImport()">📥 导入成绩Excel</button>
+          <button class="btn btn-primary" onclick="triggerGradeRankImport()">📥 导入成绩排名</button>
           <button class="btn btn-outline" onclick="exportGradeRanking()">📤 导出排名</button>
         </div>
       </div>
-
-      ${defaultSemester ? renderGradeStatsPanel(defaultSemester, state.gradeExcludeCourses?.[defaultSemester] || []) : ''}
-
       <div class="tabs" id="gradeTabs">
         <button class="tab active" onclick="switchGradeTab('ranking', this)">成绩排名</button>
+        <button class="tab" onclick="switchGradeTab('trend', this)">趋势分析</button>
         <button class="tab" onclick="switchGradeTab('compare', this)">学业vs综测对比</button>
-        <button class="tab" onclick="switchGradeTab('custom', this)">自定义排名</button>
       </div>
-
       <div id="gradeTabContent"></div>
     </div>
   `;
@@ -2291,36 +2236,35 @@ function switchGradeTab(tab, btn) {
   document.querySelectorAll('#gradeTabs .tab').forEach(t => t.classList.remove('active'));
   btn.classList.add('active');
   if (tab === 'ranking') renderGradeRanking();
+  else if (tab === 'trend') renderGradeTrend();
   else if (tab === 'compare') renderGradeCompare();
-  else if (tab === 'custom') renderCustomRanking();
+}
+
+function triggerGradeRankImport() {
+  state.fileImportCallback = handleGradeExcelImport;
+  document.getElementById('fileInput').click();
 }
 
 function renderGradeRanking() {
   const container = document.getElementById('gradeTabContent');
-  const semesters = [...new Set(state.grades.map(g => g.semester))].sort().reverse();
-
+  const semesters = [...new Set(state.grades.map(g => g.semester))].sort();
   if (semesters.length === 0) {
-    container.innerHTML = '<div class="empty-state"><div class="empty-icon">📊</div><div class="empty-text">暂无成绩数据，请点击「导入成绩Excel」</div></div>';
+    container.innerHTML = '<div class="empty-state"><div class="empty-icon">📊</div><div class="empty-text">暂无成绩排名数据，请点击「导入成绩排名」</div></div>';
     return;
   }
-
   container.innerHTML = `
     <div class="filter-bar">
       <select class="select" id="gradeSemester" onchange="updateGradeRanking()">
         ${semesters.map(s => `<option value="${s}">${s}</option>`).join('')}
       </select>
-      <select class="select" id="gradeScope" onchange="updateGradeRanking()">
-        <option value="class">按班级</option>
-        <option value="major">按专业</option>
-      </select>
       <select class="select" id="gradeClassFilter" onchange="updateGradeRanking()">
         <option value="">全部班级</option>
-        ${[...new Set(state.students.map(s => s.className).filter(Boolean))].map(c => `<option value="${c}">${c}</option>`).join('')}
+        ${[...new Set(state.students.map(s => s.className).filter(Boolean))].sort().map(c => `<option value="${c}">${c}</option>`).join('')}
       </select>
     </div>
     <div class="table-wrapper">
-      <table class="data-table" id="gradeRankTable">
-        <thead><tr><th>排名</th><th>学号</th><th>姓名</th><th>班级</th><th>加权平均分</th><th>总学分</th></tr></thead>
+      <table class="data-table">
+        <thead><tr><th>排名</th><th>学号</th><th>姓名</th><th>班级</th><th>加权总分</th></tr></thead>
         <tbody id="gradeRankBody"></tbody>
       </table>
     </div>
@@ -2330,149 +2274,100 @@ function renderGradeRanking() {
 
 function updateGradeRanking() {
   const semester = document.getElementById('gradeSemester').value;
-  const scope = document.getElementById('gradeScope').value;
   const classFilter = document.getElementById('gradeClassFilter')?.value || '';
-  const excludeNames = state.gradeExcludeCourses?.[semester] || [];
-  const { nameSet, typeSet } = parseExcludeRules(excludeNames);
-
-  const semGrades = state.grades.filter(g => g.semester === semester);
   const studentMap = {};
   state.students.forEach(s => { studentMap[s.id] = s; });
-
-  let ranked = semGrades.map(g => {
-    const student = studentMap[g.studentId];
-    if (!student) return null;
-    if (classFilter && student.className !== classFilter) return null;
-    if (scope === 'major' && document.getElementById('gradeMajorFilter')?.value) {
-      // 专业筛选（如需要可扩展）
-    }
-    const avg = calcWeightedAvg(g.courses, { excludeNames });
-    const totalCredit = (g.courses||[]).filter(c => !isCourseExcluded(c, nameSet, typeSet)).reduce((sum, c) => sum + (parseFloat(c.credit)||0), 0);
-    return { student, avg, totalCredit };
+  let rows = state.grades.filter(g => g.semester === semester).map(g => {
+    const st = studentMap[g.studentId];
+    if (!st) return null;
+    if (classFilter && st.className !== classFilter) return null;
+    return { st, score: g.weightedScore, rank: g.overallRank };
   }).filter(Boolean);
-
-  ranked.sort((a, b) => (b.avg||0) - (a.avg||0));
-
-  document.getElementById('gradeRankBody').innerHTML = ranked.map((r, i) => `
-    <tr class="row-clickable" onclick="showStudentDetail(${r.student.id})">
-      <td><span class="tag ${i<3?'tag-red':'tag-blue'}">${i+1}</span></td>
-      <td>${r.student.studentId}</td>
-      <td>${r.student.name}</td>
-      <td>${r.student.className||'-'}</td>
-      <td style="font-weight:700">${r.avg?.toFixed(2)||'-'}</td>
-      <td>${r.totalCredit.toFixed(1)}</td>
+  rows.sort((a, b) => ((a.rank != null ? a.rank : 9999) - (b.rank != null ? b.rank : 9999)) || ((b.score || 0) - (a.score || 0)));
+  document.getElementById('gradeRankBody').innerHTML = rows.map((r, i) => `
+    <tr class="row-clickable" onclick="showStudentDetail(${r.st.id})">
+      <td><span class="tag ${i < 3 ? 'tag-red' : 'tag-blue'}">${r.rank != null ? r.rank : i + 1}</span></td>
+      <td>${r.st.studentId}</td>
+      <td>${r.st.name}</td>
+      <td>${r.st.className || '-'}</td>
+      <td style="font-weight:700">${r.score != null ? r.score.toFixed(2) : '-'}</td>
     </tr>
-  `).join('') || '<tr><td colspan="6"><div class="empty-state"><div class="empty-text">暂无数据</div></div></td></tr>';
+  `).join('') || '<tr><td colspan="5"><div class="empty-state"><div class="empty-text">该条件下暂无数据</div></div></td></tr>';
 }
 
-function renderGradeAnalysis() {
+function renderGradeTrend() {
   const container = document.getElementById('gradeTabContent');
-  const semesters = [...new Set(state.grades.map(g => g.semester))].sort().reverse();
-
-  if (semesters.length === 0) {
-    container.innerHTML = '<div class="empty-state"><div class="empty-icon">📊</div><div class="empty-text">暂无成绩数据</div></div>';
+  if (state.grades.length === 0) {
+    container.innerHTML = '<div class="empty-state"><div class="empty-icon">📈</div><div class="empty-text">暂无成绩排名数据</div></div>';
     return;
   }
-
   container.innerHTML = `
     <div class="filter-bar">
-      <select class="select" id="analysisSemester" onchange="updateGradeAnalysis()">
-        ${semesters.map(s => `<option value="${s}">${s}</option>`).join('')}
-      </select>
-      <select class="select" id="analysisClass" onchange="updateGradeAnalysis()">
-        <option value="">全部班级</option>
-        ${[...new Set(state.students.map(s => s.className).filter(Boolean))].map(c => `<option value="${c}">${c}</option>`).join('')}
+      <select class="select" id="gradeTrendStudent" onchange="updateGradeTrend()">
+        ${state.students.slice().sort((a, b) => (a.className || '').localeCompare(b.className || '')).map(s => `<option value="${s.id}">${(s.className || '')} ${s.name}（${s.studentId}）</option>`).join('')}
       </select>
     </div>
-    <div style="display:grid;grid-template-columns:1fr;gap:16px">
-      <div class="chart-container"><canvas id="gradeDistChart"></canvas></div>
-      <div class="chart-container"><canvas id="gradeClassCompareChart"></canvas></div>
+    <div class="chart-container"><canvas id="gradeTrendChart"></canvas></div>
+    <div class="table-wrapper" style="margin-top:12px">
+      <table class="data-table">
+        <thead><tr><th>学期</th><th>加权总分</th><th>排名</th></tr></thead>
+        <tbody id="gradeTrendBody"></tbody>
+      </table>
     </div>
   `;
-  updateGradeAnalysis();
+  updateGradeTrend();
 }
 
-function updateGradeAnalysis() {
-  const semester = document.getElementById('analysisSemester').value;
-  const classFilter = document.getElementById('analysisClass')?.value || '';
-
-  const semGrades = state.grades.filter(g => g.semester === semester);
+function updateGradeTrend() {
+  const sid = document.getElementById('gradeTrendStudent').value;
   const studentMap = {};
   state.students.forEach(s => { studentMap[s.id] = s; });
-
-  let scores = [];
-  let classGroups = {};
-  semGrades.forEach(g => {
-    const student = studentMap[g.studentId];
-    if (!student) return;
-    if (classFilter && student.className !== classFilter) return;
-    const avg = calcWeightedAvg(g.courses);
-    if (avg) {
-      scores.push(avg);
-      const cn = student.className || '未知';
-      if (!classGroups[cn]) classGroups[cn] = [];
-      classGroups[cn].push(avg);
-    }
-  });
-
-  // 分数分布柱状图
-  const ranges = ['0-59','60-69','70-79','80-89','90-100'];
-  const distData = ranges.map(r => {
-    const [min, max] = r.split('-').map(Number);
-    return scores.filter(s => s >= min && s <= max).length;
-  });
-
-  if (state.charts.gradeDist) state.charts.gradeDist.destroy();
-  const ctx1 = document.getElementById('gradeDistChart').getContext('2d');
-  state.charts.gradeDist = new Chart(ctx1, {
-    type: 'bar',
-    data: { labels: ranges, datasets: [{ label: '人数', data: distData, backgroundColor: '#1E4E8C' }] },
+  const st = studentMap[sid];
+  const recs = state.grades.filter(g => String(g.studentId) === String(sid)).sort((a, b) => a.semester.localeCompare(b.semester));
+  const labels = recs.map(r => r.semester);
+  const scores = recs.map(r => r.weightedScore);
+  const ranks = recs.map(r => r.overallRank);
+  const body = document.getElementById('gradeTrendBody');
+  if (body) body.innerHTML = recs.map(r => `<tr><td>${r.semester}</td><td>${r.weightedScore != null ? r.weightedScore.toFixed(2) : '-'}</td><td>${r.overallRank != null ? r.overallRank : '-'}</td></tr>`).join('') || '<tr><td colspan="3">暂无数据</td></tr>';
+  const ctx = document.getElementById('gradeTrendChart');
+  if (!ctx) return;
+  if (state.charts.gradeTrend) state.charts.gradeTrend.destroy();
+  state.charts.gradeTrend = new Chart(ctx.getContext('2d'), {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [
+        { label: '加权总分', data: scores, borderColor: '#1E4E8C', backgroundColor: 'rgba(30,78,140,0.1)', fill: true, tension: 0.3, yAxisID: 'y' },
+        { label: '排名', data: ranks, borderColor: '#E53E3E', backgroundColor: 'transparent', tension: 0.3, yAxisID: 'y1' }
+      ]
+    },
     options: {
       responsive: true, maintainAspectRatio: false,
-      plugins: { title: { display: true, text: '分数段分布', font: { size: 14 } } },
-      scales: { y: { beginAtZero: true, ticks: { stepSize: 1 } } }
-    }
-  });
-
-  // 班级对比图
-  const classNames = Object.keys(classGroups);
-  const avgByClass = classNames.map(cn => (classGroups[cn].reduce((a,b)=>a+b,0)/classGroups[cn].length).toFixed(2));
-
-  if (state.charts.gradeClassCompare) state.charts.gradeClassCompare.destroy();
-  const ctx2 = document.getElementById('gradeClassCompareChart').getContext('2d');
-  state.charts.gradeClassCompare = new Chart(ctx2, {
-    type: 'bar',
-    data: { labels: classNames, datasets: [{ label: '班级平均分', data: avgByClass, backgroundColor: '#38A169' }] },
-    options: {
-      responsive: true, maintainAspectRatio: false,
-      plugins: { title: { display: true, text: '各班级加权平均分对比', font: { size: 14 } } },
-      scales: { y: { beginAtZero: true, max: 100 } }
+      scales: {
+        y: { position: 'left', title: { display: true, text: '加权总分' } },
+        y1: { position: 'right', title: { display: true, text: '排名' }, reverse: true, grid: { drawOnChartArea: false } }
+      },
+      plugins: { title: { display: true, text: (st ? st.name + ' ' : '') + '学业成绩趋势' } }
     }
   });
 }
 
 function renderGradeCompare() {
   const container = document.getElementById('gradeTabContent');
-  const semesters = [...new Set(state.grades.map(g => g.semester))].sort().reverse();
-
-  if (semesters.length === 0) {
-    container.innerHTML = '<div class="empty-state"><div class="empty-icon">📊</div><div class="empty-text">暂无成绩数据</div></div>';
+  if (state.students.length === 0) {
+    container.innerHTML = '<div class="empty-state"><div class="empty-text">暂无学生数据</div></div>';
     return;
   }
-
   container.innerHTML = `
     <div class="filter-bar">
-      <select class="select" id="compareSemester" onchange="updateGradeCompare()">
-        ${semesters.map(s => `<option value="${s}">${s}</option>`).join('')}
-      </select>
-      <select class="select" id="compareClass" onchange="updateGradeCompare()">
-        <option value="">全部班级</option>
-        ${[...new Set(state.students.map(s => s.className).filter(Boolean))].map(c => `<option value="${c}">${c}</option>`).join('')}
+      <select class="select" id="compareStudent" onchange="updateGradeCompare()">
+        ${state.students.slice().sort((a, b) => (a.className || '').localeCompare(b.className || '')).map(s => `<option value="${s.id}">${(s.className || '')} ${s.name}（${s.studentId}）</option>`).join('')}
       </select>
     </div>
-    <div class="table-wrapper">
-      <table class="data-table rank-compare-table">
-        <thead><tr><th>学号</th><th>姓名</th><th>班级</th><th>学业加权分</th><th>学业排名</th><th>综测总分</th><th>综测排名</th><th>位次差异</th></tr></thead>
+    <div class="chart-container"><canvas id="compareChart"></canvas></div>
+    <div class="table-wrapper" style="margin-top:12px">
+      <table class="data-table">
+        <thead><tr><th>学期/学年</th><th>学业加权总分</th><th>学业排名</th><th>综测总分</th><th>综测排名</th><th>位次差异(学业-综测)</th></tr></thead>
         <tbody id="compareBody"></tbody>
       </table>
     </div>
@@ -2480,365 +2375,151 @@ function renderGradeCompare() {
   updateGradeCompare();
 }
 
-async function updateGradeCompare() {
-  const semester = document.getElementById('compareSemester').value;
-  const classFilter = document.getElementById('compareClass')?.value || '';
-
-  const semGrades = state.grades.filter(g => g.semester === semester);
+function updateGradeCompare() {
+  const sid = document.getElementById('compareStudent').value;
   const studentMap = {};
   state.students.forEach(s => { studentMap[s.id] = s; });
+  const st = studentMap[sid];
+  const gradeRecs = state.grades.filter(g => String(g.studentId) === String(sid)).sort((a, b) => a.semester.localeCompare(b.semester));
+  const assessRecs = state.assessments.filter(a => String(a.studentId) === String(sid)).sort((a, b) => a.academicYear.localeCompare(b.academicYear));
 
-  let gradeRanked = semGrades.map(g => {
-    const student = studentMap[g.studentId];
-    if (!student) return null;
-    if (classFilter && student.className !== classFilter) return null;
-    return { studentId: g.studentId, student, avg: calcWeightedAvg(g.courses) };
-  }).filter(Boolean).sort((a,b) => (b.avg||0)-(a.avg||0));
+  const gMap = {}; gradeRecs.forEach(r => { gMap[r.semester] = r; });
+  const aMap = {}; assessRecs.forEach(r => { aMap[r.academicYear] = r; });
 
-  // 获取对应的综测数据
-  const yearFromSem = semester.split('-').slice(0,2).join('-');
-  const yearAssessments = await dbGetByIndex('assessments', 'academicYear', yearFromSem);
+  const semGroups = {};
+  state.grades.forEach(g => { if (typeof g.weightedScore === 'number') { (semGroups[g.semester] = semGroups[g.semester] || []).push(g); } });
+  const gradeRankByKey = {};
+  Object.keys(semGroups).forEach(s => { const arr = semGroups[s].slice().sort((x, y) => (y.weightedScore || 0) - (x.weightedScore || 0)); arr.forEach((g, i) => { gradeRankByKey[String(g.studentId) + '_' + s] = i + 1; }); });
 
-  let assessRanked = yearAssessments.map(a => {
-    const student = studentMap[a.studentId];
-    if (!student) return null;
-    if (classFilter && student.className !== classFilter) return null;
-    return { studentId: a.studentId, score: a.totalScore };
-  }).filter(Boolean).sort((a,b) => (b.score||0)-(a.score||0));
+  const yearGroups = {};
+  state.assessments.forEach(a => { (yearGroups[a.academicYear] = yearGroups[a.academicYear] || []).push(a); });
+  const assessRankByKey = {};
+  Object.keys(yearGroups).forEach(y => { const arr = yearGroups[y].slice().sort((x, yy) => (yy.totalScore || 0) - (x.totalScore || 0)); arr.forEach((a, i) => { assessRankByKey[String(a.studentId) + '_' + y] = i + 1; }); });
+
+  const allLabels = [...new Set([...gradeRecs.map(r => r.semester), ...assessRecs.map(r => r.academicYear)])].sort();
+  const gData = allLabels.map(l => gMap[l] ? gMap[l].weightedScore : null);
+  const aData = allLabels.map(l => aMap[l] ? aMap[l].totalScore : null);
+  const gRankData = allLabels.map(l => gMap[l] ? (gMap[l].overallRank != null ? gMap[l].overallRank : gradeRankByKey[String(sid) + '_' + l]) : null);
+  const aRankData = allLabels.map(l => aMap[l] ? (assessRankByKey[String(sid) + '_' + l] || null) : null);
 
   const body = document.getElementById('compareBody');
-  body.innerHTML = gradeRanked.map((g, i) => {
-    const assessIdx = assessRanked.findIndex(a => a.studentId === g.studentId);
-    const assessRank = assessIdx >= 0 ? assessIdx + 1 : '-';
-    const assessScore = assessIdx >= 0 ? assessRanked[assessIdx].score?.toFixed(2) : '-';
-    const diff = assessIdx >= 0 ? (i + 1) - (assessIdx + 1) : '-';
-    const diffText = diff === '-' ? '-' : (diff > 0 ? `<span class="tag tag-green">↑${diff}</span>` : diff < 0 ? `<span class="tag tag-red">↓${Math.abs(diff)}</span>` : '<span class="tag tag-gray">=</span>');
-    return `<tr>
-      <td>${g.student.studentId}</td>
-      <td>${g.student.name}</td>
-      <td>${g.student.className||'-'}</td>
-      <td>${g.avg?.toFixed(2)||'-'}</td>
-      <td><span class="tag tag-blue">${i+1}</span></td>
-      <td>${assessScore}</td>
-      <td>${assessRank}</td>
-      <td>${diffText}</td>
-    </tr>`;
-  }).join('') || '<tr><td colspan="8"><div class="empty-state"><div class="empty-text">暂无数据</div></div></td></tr>';
-}
-
-function renderCustomRanking() {
-  const container = document.getElementById('gradeTabContent');
-  const semesters = [...new Set(state.grades.map(g => g.semester))].sort().reverse();
-  const allCourses = [...new Set(state.grades.flatMap(g => (g.courses||[]).map(c => c.name)))].sort();
-
-  if (semesters.length === 0) {
-    container.innerHTML = '<div class="empty-state"><div class="empty-icon">📊</div><div class="empty-text">暂无成绩数据</div></div>';
-    return;
+  if (body) {
+    body.innerHTML = allLabels.map((l, i) => {
+      const g = gMap[l], a = aMap[l];
+      const gr = gRankData[i], ar = aRankData[i];
+      let diff = '-';
+      if (gr != null && ar != null) diff = gr - ar;
+      return `<tr><td>${l}</td><td>${g ? g.weightedScore.toFixed(2) : '-'}</td><td>${gr != null ? gr : '-'}</td><td>${a ? a.totalScore.toFixed(2) : '-'}</td><td>${ar != null ? ar : '-'}</td><td>${diff}</td></tr>`;
+    }).join('') || '<tr><td colspan="6">暂无数据</td></tr>';
   }
-
-  container.innerHTML = `
-    <div class="card" style="margin-bottom:12px;padding:16px">
-      <div style="font-weight:700;margin-bottom:10px">自定义排名筛选条件</div>
-      <div class="filter-bar" style="align-items:flex-end;gap:12px">
-        <label style="display:flex;flex-direction:column;gap:4px;font-size:13px;color:var(--text-body);min-width:140px">
-          学期
-          <select class="select" id="customSemester">
-            ${semesters.map(s => `<option value="${s}">${s}</option>`).join('')}
-          </select>
-        </label>
-        <label style="display:flex;flex-direction:column;gap:4px;font-size:13px;color:var(--text-body);min-width:120px">
-          专业
-          <select class="select" id="customMajor">
-            <option value="">全部专业</option>
-            ${[...new Set(state.students.map(s => s.major).filter(Boolean))].sort().map(m => `<option value="${m}">${m}</option>`).join('')}
-          </select>
-        </label>
-        <label style="display:flex;flex-direction:column;gap:4px;font-size:13px;color:var(--text-body);min-width:120px">
-          班级
-          <select class="select" id="customClass">
-            <option value="">全部班级</option>
-            ${[...new Set(state.students.map(s => s.className).filter(Boolean))].sort().map(c => `<option value="${c}">${c}</option>`).join('')}
-          </select>
-        </label>
-      </div>
-      <div style="margin:10px 0">
-        <label style="font-size:13px;font-weight:600;color:var(--text-body)">选择参与排名的课程（不选=全部课程）：</label>
-        <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;max-height:120px;overflow-y:auto;padding:8px;background:var(--bg-light);border-radius:6px">
-          ${allCourses.map(c => `<label style="font-size:13px;display:flex;align-items:center;gap:4px;cursor:pointer"><input type="checkbox" value="${c}" class="custom-course"> ${c}</label>`).join('')}
-        </div>
-      </div>
-      <button class="btn btn-primary" onclick="calcCustomRanking()">生成排名</button>
-    </div>
-    <div id="customRankResult"></div>
-  `;
-}
-
-function calcCustomRanking() {
-  const semester = document.getElementById('customSemester').value;
-  const major = document.getElementById('customMajor').value;
-  const classFilter = document.getElementById('customClass').value;
-  const selectedCourses = [...document.querySelectorAll('.custom-course:checked')].map(c => c.value);
-
-  const semGrades = state.grades.filter(g => g.semester === semester);
-  const studentMap = {};
-  state.students.forEach(s => { studentMap[s.id] = s; });
-
-  let ranked = semGrades.map(g => {
-    const student = studentMap[g.studentId];
-    if (!student) return null;
-    if (major && student.major !== major) return null;
-    if (classFilter && student.className !== classFilter) return null;
-    let courses = g.courses || [];
-    if (selectedCourses.length > 0) {
-      courses = courses.filter(c => selectedCourses.includes(c.name));
-    }
-    const avg = calcWeightedAvg(courses);
-    return { student, avg, courseCount: courses.length };
-  }).filter(Boolean).sort((a,b) => (b.avg||0)-(a.avg||0));
-
-  document.getElementById('customRankResult').innerHTML = `
-    <div class="table-wrapper">
-      <table class="data-table">
-        <thead><tr><th>排名</th><th>学号</th><th>姓名</th><th>${major?'专业':'班级'}</th><th>加权平均分</th><th>课程数</th></tr></thead>
-        <tbody>
-          ${ranked.map((r, i) => `<tr class="row-clickable" onclick="showStudentDetail(${r.student.id})">
-            <td><span class="tag ${i<3?'tag-red':'tag-blue'}">${i+1}</span></td>
-            <td>${r.student.studentId}</td>
-            <td>${r.student.name}</td>
-            <td>${major ? (r.student.major||'-') : (r.student.className||'-')}</td>
-            <td style="font-weight:700">${r.avg?.toFixed(2)||'-'}</td>
-            <td>${r.courseCount}</td>
-          </tr>`).join('') || '<tr><td colspan="6"><div class="empty-state"><div class="empty-text">暂无数据</div></div></td></tr>'}
-        </tbody>
-      </table>
-    </div>
-  `;
-  showToast(`已生成排名，共 ${ranked.length} 人`, 'success');
-}
-
-// 成绩导入
-function triggerGradeImport() {
-  state.fileImportCallback = handleGradeExcelImport;
-  document.getElementById('fileInput').click();
+  const ctx = document.getElementById('compareChart');
+  if (ctx) {
+    if (state.charts.compare) state.charts.compare.destroy();
+    state.charts.compare = new Chart(ctx.getContext('2d'), {
+      type: 'line',
+      data: { labels: allLabels, datasets: [
+        { label: '学业排名', data: gRankData, borderColor: '#1E4E8C', tension: 0.3, yAxisID: 'y' },
+        { label: '综测排名', data: aRankData, borderColor: '#E53E3E', tension: 0.3, yAxisID: 'y' }
+      ]},
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        scales: { y: { reverse: true, title: { display: true, text: '排名（越小越好）' } } },
+        plugins: { title: { display: true, text: (st ? st.name + ' ' : '') + '学业 vs 综测 排名对比' } }
+      }
+    });
+  }
 }
 
 async function handleGradeExcelImport(file) {
-  showLoading('正在解析成绩Excel...');
+  showLoading('正在解析成绩排名Excel...');
   try {
     const data = await readExcelFile(file);
-    if (!data || data.length === 0) { hideLoading(); showToast('文件为空', 'error'); return; }
-
-    // 识别表头列名
-    const sample = data[0] || {};
-    const headers = {};
-    const headerKeys = Object.keys(sample);
-
-    function findHeader(names) {
-      for (const key of headerKeys) {
-        const cleaned = cleanColumnName(key);
-        if (names.includes(cleaned)) return key;
+    if (!data || data.length === 0) { hideLoading(); showToast('文件为空或格式不正确', 'error'); return; }
+    const first = data[0];
+    const colOf = (candidates) => {
+      for (const c of candidates) {
+        if (first.hasOwnProperty(c)) return c;
+        const hit = Object.keys(first).find(k => k.replace(/\s/g, '').includes(c.replace(/\s/g, '')));
+        if (hit) return hit;
       }
       return null;
+    };
+    const sidCol = colOf(['学号', '考号', '考生号']) || Object.keys(first)[0];
+    const nameCol = colOf(['姓名', '学生姓名', '名字']);
+    const semCol = colOf(['学期', '学年学期', '学期名称']);
+    const scoreCol = colOf(['加权总分', '学业加权总分', '加权平均成绩', '总分', '成绩']) || Object.keys(first).find(k => k.includes('分'));
+    const rankCol = colOf(['排名', '总排名', '名次', '位次']);
+
+    let useSemPrompt = false, semesterBase = '';
+    const sampleSem = String(data.find(r => r[semCol])?.[semCol] || '');
+    const semNum = parseInt(sampleSem, 10);
+    if (String(semNum) === sampleSem.replace(/\s/g, '') && [1, 2].includes(semNum)) {
+      useSemPrompt = true;
+      const base = await showPromptModal('成绩导入', '检测到学期列为数字 1/2，请输入学年基准', '如：2025-2026', '2025-2026');
+      if (!base) { hideLoading(); return; }
+      semesterBase = base.trim();
+      if (!/^\d{4}-\d{4}$/.test(semesterBase)) { hideLoading(); showToast('学年基准格式应为 2025-2026，请重新导入', 'error'); return; }
     }
 
-    headers.studentId = findHeader(['学号', '学生学号', '学籍号', '考号', '编号']);
-    headers.name = findHeader(['姓名', '学生姓名', '名字']);
-    headers.courseName = findHeader(['课程名称', '课程名', '课程', '科目']);
-    headers.score = findHeader(['总评成绩', '总评', '成绩', '分数', '得分', '分数(百分制)', '百分制成绩']);
-    headers.credit = findHeader(['学分', '学分数', '学分(分)']);
-    headers.gpa = findHeader(['绩点', '课程绩点', 'gpa']);
-    headers.courseType = findHeader(['课程性质', '性质', '课程类型', '类型', 'courseType']);
-    headers.semester = findHeader(['学期', '学期号', '学期名称', 'semester']);
-
-    if (!headers.studentId) { hideLoading(); showToast('未识别到「学号」列，请检查表头', 'error'); return; }
-    if (!headers.courseName) { hideLoading(); showToast('未识别到「课程名称」列，请检查表头', 'error'); return; }
-    if (!headers.score) {
-      // 没有总评成绩，尝试平时/期中/期末组合（截图中有平时、期中、期末列）
-      headers.regular = findHeader(['平时成绩', '平时', '平时分']);
-      headers.midterm = findHeader(['期中成绩', '期中', '期中分']);
-      headers.final = findHeader(['期末成绩', '期末', '期末分', '期末考试']);
-      if (!headers.regular && !headers.midterm && !headers.final) {
-        hideLoading(); showToast('未识别到成绩列（总评/平时/期中/期末），请检查表头', 'error'); return;
-      }
-    }
-
-    // 判断学期列是纯数字 1/2 还是完整学期名
-    let useSemesterPrompt = false;
-    let semesterBase = '';
-    if (headers.semester) {
-      const sampleSem = String(data.slice(0, 10).find(r => r[headers.semester])?.[headers.semester] || '');
-      const semNum = parseInt(sampleSem, 10);
-      if (String(semNum) === sampleSem.replace(/\s/g, '') && [1, 2].includes(semNum)) {
-        useSemesterPrompt = true;
-        hideLoading(); // 先关闭 loading，避免遮住输入弹窗
-        const base = await showPromptModal('成绩导入', '检测到学期列为数字 1/2，请输入学年基准', '如：2025-2026', '2025-2026');
-        if (!base) { hideLoading(); return; }
-        semesterBase = base.trim();
-        if (!/^\d{4}-\d{4}$/.test(semesterBase)) {
-          hideLoading();
-          showToast('学年基准格式应为 2025-2026，请重新导入', 'error');
-          return;
-        }
-        showLoading('正在解析成绩Excel...');
-      }
-    }
-
-    // 按学号+学期分组（分片循环，避免大数据量阻塞 UI）
-    const gradeMap = {};
-    let totalCourses = 0, skippedRows = 0;
-
-    for (let i = 0; i < data.length; i++) {
-      const row = data[i];
-      const rawSid = row[headers.studentId] != null ? String(row[headers.studentId]) : '';
-      const sid = normalizeStudentId(rawSid);
-      if (!sid) { skippedRows++; continue; }
-
-      const courseName = String(row[headers.courseName] || '').trim();
-      if (!courseName) { skippedRows++; continue; }
-
-      let score = null;
-      if (headers.score) {
-        score = parseFloat(row[headers.score]);
-      } else {
-        // 组合成绩：优先总评，没有则按 平时30% + 期中30% + 期末40% 估算
-        const r = parseFloat(row[headers.regular]);
-        const m = parseFloat(row[headers.midterm]);
-        const f = parseFloat(row[headers.final]);
-        let est = 0, w = 0;
-        if (!isNaN(r)) { est += r * 0.3; w += 0.3; }
-        if (!isNaN(m)) { est += m * 0.3; w += 0.3; }
-        if (!isNaN(f)) { est += f * 0.4; w += 0.4; }
-        if (w > 0) score = Math.round(est / w);
-      }
-      if (score == null || isNaN(score)) { skippedRows++; continue; }
-
-      const credit = parseFloat(row[headers.credit]) || 1;
-      const gpa = parseFloat(row[headers.gpa]);
-      const courseType = String(row[headers.courseType] || '').trim() || '其他';
-
-      let semester = '未命名学期';
-      if (headers.semester) {
-        const rawSem = String(row[headers.semester]).trim();
-        if (useSemesterPrompt && semesterBase) {
-          const semNum = parseInt(rawSem, 10);
-          semester = `${semesterBase}-${semNum}`;
-        } else if (rawSem) {
-          semester = rawSem;
-        }
-      }
-
-      const key = `${sid}__${semester}`;
-      if (!gradeMap[key]) gradeMap[key] = { semester, studentId: sid, courses: [] };
-      gradeMap[key].courses.push({ name: courseName, score, credit, gpa: isNaN(gpa) ? null : gpa, courseType, policyPass: false });
-      totalCourses++;
-
-      // 每处理 200 行让出一次主线程，保证 loading 动画和弹窗不被卡死
-      if (i % 200 === 199) await yieldToMain();
-    }
-
-    // 匹配学生并存储
     const students = await dbGetAll('students');
-    const studentBySid = {};
-    students.forEach(s => { studentBySid[normalizeStudentId(s.studentId)] = s; });
+    const bySid = {}, byName = {};
+    students.forEach(s => { const sid = normalizeStudentId(s.studentId); if (sid) bySid[sid] = s; const nm = String(s.name || '').trim(); if (nm) byName[nm] = s; });
+    const existing = await dbGetAll('grades');
+    const existByKey = {};
+    existing.forEach(g => { if (g && g.studentId && g.semester) existByKey[String(g.studentId) + '__' + g.semester] = g; });
 
-    // 一次性拉取全部成绩并在内存建索引，避免循环内逐条查询（性能关键）
-    const allGrades = await dbGetAll('grades');
-    const gradesBySid = {};
-    allGrades.forEach(g => {
-      const sid = String(g.studentId);
-      if (!gradesBySid[sid]) gradesBySid[sid] = [];
-      gradesBySid[sid].push(g);
-    });
-
-    let count = 0, unmatched = 0, updated = 0, added = 0;
-    const toAdd = [];
-    const toPut = [];
-    for (const gradeData of Object.values(gradeMap)) {
-      const student = studentBySid[gradeData.studentId];
+    const toAdd = [], toUpdate = [];
+    let unmatched = 0;
+    for (const row of data) {
+      const sidRaw = String(row[sidCol] || (nameCol ? row[nameCol] : '') || '').trim();
+      const sid = normalizeStudentId(sidRaw);
+      const nm = nameCol ? String(row[nameCol] || '').trim() : '';
+      const student = (sid && bySid[sid]) || (nm && byName[nm]) || null;
       if (!student) { unmatched++; continue; }
-
-      // 在内存索引中查找是否已有该学期数据
-      const existList = gradesBySid[String(student.id)] || [];
-      const existSem = existList.find(g => g.semester === gradeData.semester);
-      if (existSem) {
-        // 合并课程：同名课程新数据覆盖，其余追加
-        const existMap = {};
-        (existSem.courses || []).forEach(c => { existMap[c.name] = c; });
-        gradeData.courses.forEach(c => {
-          existMap[c.name] = c; // 新数据覆盖
-        });
-        toPut.push({
-          ...existSem,
-          semester: gradeData.semester,
-          studentId: String(student.id),
-          courses: Object.values(existMap),
-          updatedAt: Date.now(),
-          id: existSem.id
-        });
-        updated++;
-      } else {
-        toAdd.push({
-          semester: gradeData.semester,
-          studentId: String(student.id),
-          courses: gradeData.courses,
-          createdAt: Date.now(),
-          updatedAt: Date.now()
-        });
-        added++;
-      }
-      count++;
+      let semester = semCol ? String(row[semCol] || '').trim() : '未命名学期';
+      if (useSemPrompt && semesterBase) { const n = parseInt(semester, 10); if ([1, 2].includes(n)) semester = semesterBase + '-' + n; }
+      const score = parseFloat(String(row[scoreCol] || '').replace(/[^\d.]/g, ''));
+      const rank = rankCol ? parseInt(String(row[rankCol] || '').replace(/[^\d]/g, ''), 10) : null;
+      if (isNaN(score)) continue;
+      const key = String(student.id) + '__' + semester;
+      const rec = { studentId: String(student.id), semester, weightedScore: score, overallRank: (rank && !isNaN(rank)) ? rank : null, className: student.className || '', updatedAt: Date.now() };
+      if (existByKey[key]) { rec.id = existByKey[key].id; rec.createdAt = existByKey[key].createdAt || Date.now(); toUpdate.push(rec); }
+      else { rec.createdAt = Date.now(); toAdd.push(rec); }
     }
 
-    // 批量写入：1 次读取 + 最多 2 次写入事务（替代原来每人 2 次 ≈ 288 次事务）
-    showLoading('正在保存成绩数据...');
+    for (const rec of toUpdate) await dbPut('grades', rec);
     if (toAdd.length) await dbAddBatch('grades', toAdd);
-    if (toPut.length) await dbPutBatch('grades', toPut);
 
     hideLoading();
-    showToast(`导入完成：匹配 ${count} 人（新增 ${added} / 更新 ${updated}），${totalCourses} 门课程${unmatched > 0 ? `，${unmatched} 人未匹配` : ''}${skippedRows > 0 ? `，跳过 ${skippedRows} 行无效数据` : ''}`, 'success');
-    state.grades = await dbGetAll('grades');
+    showToast(`导入完成：新增 ${toAdd.length} 条，更新 ${toUpdate.length} 条${unmatched > 0 ? `，${unmatched} 人未匹配` : ''}`, 'success');
+    state.grades = (await dbGetAll('grades')).filter(g => g && typeof g.weightedScore === 'number');
     navigateTo('grades');
   } catch (err) {
     hideLoading();
+    console.error(err);
     showToast('导入失败：' + err.message, 'error');
   }
 }
 
 async function exportGradeRanking() {
-  const semesters = [...new Set(state.grades.map(g => g.semester))].sort().reverse();
-  if (semesters.length === 0) { showToast('暂无成绩数据', 'error'); return; }
-
-  let allData = [];
-  for (const semester of semesters) {
-    const semGrades = state.grades.filter(g => g.semester === semester);
-    const studentMap = {};
-    state.students.forEach(s => { studentMap[s.id] = s; });
-
-    let ranked = semGrades.map(g => {
-      const student = studentMap[g.studentId];
-      if (!student) return null;
-      return { student, avg: calcWeightedAvg(g.courses) };
-    }).filter(Boolean).sort((a,b) => (b.avg||0)-(a.avg||0));
-
-    ranked.forEach((r, i) => {
-      allData.push({
-        '学期': semester, '排名': i+1, '学号': r.student.studentId, '姓名': r.student.name,
-        '班级': r.student.className||'', '加权平均分': r.avg?.toFixed(2)||''
-      });
-    });
-    allData.push({ '学期': '', '排名': '', '学号': '', '姓名': '', '班级': '', '加权平均分': '' });
+  const semesters = [...new Set(state.grades.map(g => g.semester))].sort();
+  if (semesters.length === 0) { showToast('暂无数据', 'error'); return; }
+  const studentMap = {}; state.students.forEach(s => { studentMap[s.id] = s; });
+  let all = [];
+  for (const sem of semesters) {
+    const recs = state.grades.filter(g => g.semester === sem).map(g => ({ st: studentMap[g.studentId], g })).filter(x => x.st)
+      .sort((a, b) => ((a.g.overallRank != null ? a.g.overallRank : 9999) - (b.g.overallRank != null ? b.g.overallRank : 9999)) || ((b.g.weightedScore || 0) - (a.g.weightedScore || 0)));
+    recs.forEach((x, i) => { all.push({ '学期': sem, '排名': x.g.overallRank != null ? x.g.overallRank : i + 1, '学号': x.st.studentId, '姓名': x.st.name, '班级': x.st.className || '', '加权总分': x.g.weightedScore != null ? x.g.weightedScore.toFixed(2) : '' }); });
+    all.push({ '学期': '', '排名': '', '学号': '', '姓名': '', '班级': '', '加权总分': '' });
   }
-  exportToExcel(allData, `学业排名_${formatDate(new Date())}.xlsx`, '学业排名');
+  exportToExcel(all, `学业成绩排名_${formatDate(new Date())}.xlsx`, '学业成绩排名');
   showToast('已导出', 'success');
 }
-
 // ---------- 综测管理 ----------
 MODULE_RENDERERS.assessment = async function(container) {
   state.assessments = await dbGetAll('assessments');
   state.students = await dbGetAll('students');
-
   const years = [...new Set(state.assessments.map(a => a.academicYear))].sort().reverse();
-
   container.innerHTML = `
     <div class="card">
       <div class="card-header">
@@ -2851,11 +2532,9 @@ MODULE_RENDERERS.assessment = async function(container) {
           <button class="btn btn-outline" onclick="exportAssessmentRanking()">📤 导出排名</button>
         </div>
       </div>
-
       <div class="tabs" id="assessTabs">
         <button class="tab active" onclick="switchAssessTab('ranking', this)">综测排名</button>
-        <button class="tab" onclick="switchAssessTab('analysis', this)">分布分析</button>
-        <button class="tab" onclick="switchAssessTab('compare', this)">学业vs综测对比</button>
+        <button class="tab" onclick="switchAssessTab('trend', this)">趋势分析</button>
       </div>
       <div id="assessTabContent"></div>
     </div>
@@ -2867,19 +2546,16 @@ function switchAssessTab(tab, btn) {
   document.querySelectorAll('#assessTabs .tab').forEach(t => t.classList.remove('active'));
   btn.classList.add('active');
   if (tab === 'ranking') renderAssessRanking();
-  else if (tab === 'analysis') renderAssessAnalysis();
-  else if (tab === 'compare') renderAssessCompare();
+  else if (tab === 'trend') renderAssessTrend();
 }
 
 function renderAssessRanking() {
   const container = document.getElementById('assessTabContent');
   const years = [...new Set(state.assessments.map(a => a.academicYear))].sort().reverse();
-
   if (years.length === 0) {
     container.innerHTML = '<div class="empty-state"><div class="empty-icon">📋</div><div class="empty-text">暂无综测数据，请点击「导入综测Excel」</div></div>';
     return;
   }
-
   container.innerHTML = `
     <div class="filter-bar">
       <select class="select" id="assessYear" onchange="updateAssessRanking()">
@@ -2887,7 +2563,7 @@ function renderAssessRanking() {
       </select>
       <select class="select" id="assessClass" onchange="updateAssessRanking()">
         <option value="">全部班级</option>
-        ${[...new Set(state.students.map(s => s.className).filter(Boolean))].map(c => `<option value="${c}">${c}</option>`).join('')}
+        ${[...new Set(state.students.map(s => s.className).filter(Boolean))].sort().map(c => `<option value="${c}">${c}</option>`).join('')}
       </select>
     </div>
     <div class="table-wrapper">
@@ -2903,184 +2579,86 @@ function renderAssessRanking() {
 function updateAssessRanking() {
   const year = document.getElementById('assessYear').value;
   const classFilter = document.getElementById('assessClass')?.value || '';
-
-  const yearAssess = state.assessments.filter(a => a.academicYear === year);
   const studentMap = {};
   state.students.forEach(s => { studentMap[s.id] = s; });
-
-  let ranked = yearAssess.map(a => {
-    const student = studentMap[a.studentId];
-    if (!student) return null;
-    if (classFilter && student.className !== classFilter) return null;
-    return { student, score: a.totalScore, items: a.items };
-  }).filter(Boolean).sort((a,b) => (b.score||0)-(a.score||0));
-
-  document.getElementById('assessRankBody').innerHTML = ranked.map((r, i) => `
-    <tr class="row-clickable" onclick="showStudentDetail(${r.student.id})">
-      <td><span class="tag ${i<3?'tag-red':'tag-blue'}">${i+1}</span></td>
-      <td>${r.student.studentId}</td>
-      <td>${r.student.name}</td>
-      <td>${r.student.className||'-'}</td>
-      <td style="font-weight:700">${r.score?.toFixed(2)||'-'}</td>
+  let rows = state.assessments.filter(a => a.academicYear === year).map(a => {
+    const st = studentMap[a.studentId];
+    if (!st) return null;
+    if (classFilter && st.className !== classFilter) return null;
+    return { st, score: a.totalScore };
+  }).filter(Boolean).sort((a, b) => (b.score || 0) - (a.score || 0));
+  document.getElementById('assessRankBody').innerHTML = rows.map((r, i) => `
+    <tr class="row-clickable" onclick="showStudentDetail(${r.st.id})">
+      <td><span class="tag ${i < 3 ? 'tag-red' : 'tag-blue'}">${i + 1}</span></td>
+      <td>${r.st.studentId}</td>
+      <td>${r.st.name}</td>
+      <td>${r.st.className || '-'}</td>
+      <td style="font-weight:700">${r.score != null ? r.score.toFixed(2) : '-'}</td>
     </tr>
   `).join('') || '<tr><td colspan="5"><div class="empty-state"><div class="empty-text">暂无数据</div></div></td></tr>';
 }
 
-function renderAssessAnalysis() {
+function renderAssessTrend() {
   const container = document.getElementById('assessTabContent');
-  const years = [...new Set(state.assessments.map(a => a.academicYear))].sort().reverse();
-
-  if (years.length === 0) {
-    container.innerHTML = '<div class="empty-state"><div class="empty-icon">📊</div><div class="empty-text">暂无综测数据</div></div>';
+  if (state.assessments.length === 0) {
+    container.innerHTML = '<div class="empty-state"><div class="empty-icon">📈</div><div class="empty-text">暂无综测数据</div></div>';
     return;
   }
-
   container.innerHTML = `
     <div class="filter-bar">
-      <select class="select" id="assessAnalysisYear" onchange="updateAssessAnalysis()">
-        ${years.map(y => `<option value="${y}">${y}</option>`).join('')}
-      </select>
-      <select class="select" id="assessAnalysisClass" onchange="updateAssessAnalysis()">
-        <option value="">全部班级</option>
-        ${[...new Set(state.students.map(s => s.className).filter(Boolean))].map(c => `<option value="${c}">${c}</option>`).join('')}
+      <select class="select" id="assessTrendStudent" onchange="updateAssessTrend()">
+        ${state.students.slice().sort((a, b) => (a.className || '').localeCompare(b.className || '')).map(s => `<option value="${s.id}">${(s.className || '')} ${s.name}（${s.studentId}）</option>`).join('')}
       </select>
     </div>
-    <div class="chart-container"><canvas id="assessDistChart"></canvas></div>
-    <div class="chart-container" style="margin-top:16px"><canvas id="assessClassChart"></canvas></div>
-  `;
-  updateAssessAnalysis();
-}
-
-function updateAssessAnalysis() {
-  const year = document.getElementById('assessAnalysisYear').value;
-  const classFilter = document.getElementById('assessAnalysisClass')?.value || '';
-
-  const yearAssess = state.assessments.filter(a => a.academicYear === year);
-  const studentMap = {};
-  state.students.forEach(s => { studentMap[s.id] = s; });
-
-  let scores = [];
-  let classGroups = {};
-  yearAssess.forEach(a => {
-    const student = studentMap[a.studentId];
-    if (!student) return;
-    if (classFilter && student.className !== classFilter) return;
-    if (a.totalScore) {
-      scores.push(a.totalScore);
-      const cn = student.className || '未知';
-      if (!classGroups[cn]) classGroups[cn] = [];
-      classGroups[cn].push(a.totalScore);
-    }
-  });
-
-  const ranges = ['0-59','60-69','70-79','80-89','90-100'];
-  const distData = ranges.map(r => {
-    const [min, max] = r.split('-').map(Number);
-    return scores.filter(s => s >= min && s <= max).length;
-  });
-
-  if (state.charts.assessDist) state.charts.assessDist.destroy();
-  const ctx1 = document.getElementById('assessDistChart').getContext('2d');
-  state.charts.assessDist = new Chart(ctx1, {
-    type: 'bar',
-    data: { labels: ranges, datasets: [{ label: '人数', data: distData, backgroundColor: '#1E4E8C' }] },
-    options: {
-      responsive: true, maintainAspectRatio: false,
-      plugins: { title: { display: true, text: '综测分数段分布', font: { size: 14 } } },
-      scales: { y: { beginAtZero: true, ticks: { stepSize: 1 } } }
-    }
-  });
-
-  const classNames = Object.keys(classGroups);
-  const avgByClass = classNames.map(cn => (classGroups[cn].reduce((a,b)=>a+b,0)/classGroups[cn].length).toFixed(2));
-
-  if (state.charts.assessClassChart) state.charts.assessClassChart.destroy();
-  const ctx2 = document.getElementById('assessClassChart').getContext('2d');
-  state.charts.assessClassChart = new Chart(ctx2, {
-    type: 'bar',
-    data: { labels: classNames, datasets: [{ label: '班级综测平均分', data: avgByClass, backgroundColor: '#38A169' }] },
-    options: {
-      responsive: true, maintainAspectRatio: false,
-      plugins: { title: { display: true, text: '各班级综测平均分对比', font: { size: 14 } } },
-      scales: { y: { beginAtZero: true, max: 100 } }
-    }
-  });
-}
-
-function renderAssessCompare() {
-  const container = document.getElementById('assessTabContent');
-  const years = [...new Set(state.assessments.map(a => a.academicYear))].sort().reverse();
-
-  if (years.length === 0) {
-    container.innerHTML = '<div class="empty-state"><div class="empty-icon">📊</div><div class="empty-text">暂无综测数据</div></div>';
-    return;
-  }
-
-  container.innerHTML = `
-    <div class="filter-bar">
-      <select class="select" id="assessCompareYear" onchange="updateAssessCompare()">
-        ${years.map(y => `<option value="${y}">${y}</option>`).join('')}
-      </select>
-      <select class="select" id="assessCompareClass" onchange="updateAssessCompare()">
-        <option value="">全部班级</option>
-        ${[...new Set(state.students.map(s => s.className).filter(Boolean))].map(c => `<option value="${c}">${c}</option>`).join('')}
-      </select>
-    </div>
-    <div class="table-wrapper">
-      <table class="data-table rank-compare-table">
-        <thead><tr><th>学号</th><th>姓名</th><th>班级</th><th>综测总分</th><th>综测排名</th><th>学业加权分</th><th>学业排名</th><th>位次差异</th></tr></thead>
-        <tbody id="assessCompareBody"></tbody>
+    <div class="chart-container"><canvas id="assessTrendChart"></canvas></div>
+    <div class="table-wrapper" style="margin-top:12px">
+      <table class="data-table">
+        <thead><tr><th>学年</th><th>综测总分</th><th>排名</th></tr></thead>
+        <tbody id="assessTrendBody"></tbody>
       </table>
     </div>
   `;
-  updateAssessCompare();
+  updateAssessTrend();
 }
 
-async function updateAssessCompare() {
-  const year = document.getElementById('assessCompareYear').value;
-  const classFilter = document.getElementById('assessCompareClass')?.value || '';
-
-  const yearAssess = state.assessments.filter(a => a.academicYear === year);
+function updateAssessTrend() {
+  const sid = document.getElementById('assessTrendStudent').value;
   const studentMap = {};
   state.students.forEach(s => { studentMap[s.id] = s; });
-
-  let assessRanked = yearAssess.map(a => {
-    const student = studentMap[a.studentId];
-    if (!student) return null;
-    if (classFilter && student.className !== classFilter) return null;
-    return { studentId: a.studentId, student, score: a.totalScore };
-  }).filter(Boolean).sort((a,b) => (b.score||0)-(a.score||0));
-
-  // 获取对应的学业数据
-  const semesterPrefix = year.split('-').slice(0,2).join('-');
-  const semGrades = state.grades.filter(g => g.semester.startsWith(semesterPrefix));
-  let gradeRanked = semGrades.map(g => {
-    const student = studentMap[g.studentId];
-    if (!student) return null;
-    if (classFilter && student.className !== classFilter) return null;
-    return { studentId: g.studentId, avg: calcWeightedAvg(g.courses) };
-  }).filter(Boolean).sort((a,b) => (b.avg||0)-(a.avg||0));
-
-  const body = document.getElementById('assessCompareBody');
-  body.innerHTML = assessRanked.map((a, i) => {
-    const gradeIdx = gradeRanked.findIndex(g => g.studentId === a.studentId);
-    const gradeRank = gradeIdx >= 0 ? gradeIdx + 1 : '-';
-    const gradeScore = gradeIdx >= 0 ? gradeRanked[gradeIdx].avg?.toFixed(2) : '-';
-    const diff = gradeIdx >= 0 ? (i + 1) - (gradeIdx + 1) : '-';
-    const diffText = diff === '-' ? '-' : (diff > 0 ? `<span class="tag tag-green">↑${diff}</span>` : diff < 0 ? `<span class="tag tag-red">↓${Math.abs(diff)}</span>` : '<span class="tag tag-gray">=</span>');
-    return `<tr>
-      <td>${a.student.studentId}</td>
-      <td>${a.student.name}</td>
-      <td>${a.student.className||'-'}</td>
-      <td>${a.score?.toFixed(2)||'-'}</td>
-      <td><span class="tag tag-blue">${i+1}</span></td>
-      <td>${gradeScore}</td>
-      <td>${gradeRank}</td>
-      <td>${diffText}</td>
-    </tr>`;
-  }).join('') || '<tr><td colspan="8"><div class="empty-state"><div class="empty-text">暂无数据</div></div></td></tr>';
+  const st = studentMap[sid];
+  const recs = state.assessments.filter(a => String(a.studentId) === String(sid)).sort((a, b) => a.academicYear.localeCompare(b.academicYear));
+  const yearGroups = {};
+  state.assessments.forEach(a => { (yearGroups[a.academicYear] = yearGroups[a.academicYear] || []).push(a); });
+  const rankMap = {};
+  Object.keys(yearGroups).forEach(y => { const arr = yearGroups[y].slice().sort((x, yy) => (yy.totalScore || 0) - (x.totalScore || 0)); arr.forEach((a, i) => { rankMap[String(a.studentId) + '_' + y] = i + 1; }); });
+  const labels = recs.map(r => r.academicYear);
+  const scores = recs.map(r => r.totalScore);
+  const ranks = recs.map(r => rankMap[String(sid) + '_' + r.academicYear]);
+  const body = document.getElementById('assessTrendBody');
+  if (body) body.innerHTML = recs.map((r, i) => `<tr><td>${r.academicYear}</td><td>${r.totalScore != null ? r.totalScore.toFixed(2) : '-'}</td><td>${ranks[i] != null ? ranks[i] : '-'}</td></tr>`).join('') || '<tr><td colspan="3">暂无数据</td></tr>';
+  const ctx = document.getElementById('assessTrendChart');
+  if (ctx) {
+    if (state.charts.assessTrend) state.charts.assessTrend.destroy();
+    state.charts.assessTrend = new Chart(ctx.getContext('2d'), {
+      type: 'line',
+      data: {
+        labels,
+        datasets: [
+          { label: '综测总分', data: scores, borderColor: '#38A169', backgroundColor: 'rgba(56,161,105,0.1)', fill: true, tension: 0.3, yAxisID: 'y' },
+          { label: '排名', data: ranks, borderColor: '#E53E3E', tension: 0.3, yAxisID: 'y1' }
+        ]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        scales: {
+          y: { position: 'left', title: { display: true, text: '综测总分' } },
+          y1: { position: 'right', title: { display: true, text: '排名' }, reverse: true, grid: { drawOnChartArea: false } }
+        },
+        plugins: { title: { display: true, text: (st ? st.name + ' ' : '') + '综测趋势' } }
+      }
+    });
+  }
 }
-
 function triggerAssessmentImport() {
   state.fileImportCallback = handleAssessmentImport;
   document.getElementById('fileInput').click();
@@ -3949,8 +3527,8 @@ MODULE_RENDERERS.settings = async function(container) {
       <div style="font-size:13px;color:var(--text-body);line-height:2">
         ${cloudReady ? '<p><strong>登录：</strong>邮箱+密码登录，数据自动同步到云端</p>' : '<p><strong>首次使用：</strong>设置密码后进入工作台</p>'}
         <p><strong>导入学生：</strong>点击「学生管理」→「导入Excel」，上传包含学号、姓名等信息的Excel表</p>
-        <p><strong>导入成绩：</strong>点击「学业成绩」→「导入成绩Excel」，Excel需包含学号、课程名称、分数、学分等列</p>
-        <p><strong>导入综测：</strong>点击「综测管理」→「导入综测Excel」，Excel需包含学号和综测总分</p>
+        <p><strong>导入成绩：</strong>点击「学业成绩」→「导入成绩排名」，上传已算好的排名表（建议含：学号、姓名、班级、学期、加权总分、总排名），系统自动记录并支持趋势/对比分析</p>
+        <p><strong>导入综测：</strong>点击「综测管理」→「导入综测Excel」，Excel需包含学号和综测总分，系统自动计算排名</p>
         ${cloudReady ? '<p><strong>换设备：</strong>新设备打开网址→邮箱登录→数据自动恢复</p>' : '<p><strong>换设备：</strong>导出备份→网盘→新设备导入恢复</p>'}
       </div>
     </div>
