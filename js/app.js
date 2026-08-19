@@ -108,10 +108,17 @@ function detectFieldType(key, values) {
   return 'text';
 }
 
-// 标准化学号（去除所有空白，统一为字符串）
+// 标准化学号（去除空白、不可见字符，并修复数值 .0 / 科学计数法）
 function normalizeStudentId(id) {
   if (id == null || id === '') return '';
-  return String(id).replace(/[\s\u00A0\u200B-\u200D\uFEFF]+/g, '').trim();
+  let s = String(id).replace(/[\s\u00A0\u200B-\u200D\uFEFF]+/g, '').trim();
+  // Excel 常把长学号读成 "2023123456.0" 或科学计数法，统一转纯数字字符串
+  if (/^-?\d+\.0+$/.test(s)) s = s.split('.')[0];
+  if (/^-?\d+(\.\d+)?[eE][+-]?\d+$/.test(s)) {
+    const n = Number(s);
+    if (!isNaN(n) && isFinite(n)) s = String(Math.round(n));
+  }
+  return s;
 }
 
 // 让出主线程，防止大数据量循环阻塞 UI
@@ -126,6 +133,24 @@ function cleanColumnName(name) {
     .replace(/^[^\u4e00-\u9fa5a-zA-Z0-9_]+/g, '')
     .replace(/[^\u4e00-\u9fa5a-zA-Z0-9_]+$/g, '')
     .trim();
+}
+
+// 自动检测表头行：返回第一个看起来像表头的行号（0-based）
+function findHeaderIndex(rows) {
+  const idKeys = ['学号', '考号', '考生号', '学籍号'];
+  const nameKeys = ['姓名', '学生姓名', '名字'];
+  const scoreKeys = ['学分加权平均分', '加权总分', '加权平均成绩', '加权平均分', '学业加权总分', '总分', '成绩', '分数'];
+  for (let i = 0; i < Math.min(rows.length, 20); i++) {
+    const row = rows[i];
+    if (!row || row.length === 0) continue;
+    const cleaned = row.map(c => cleanColumnName(String(c || ''))).filter(Boolean);
+    const hasId = cleaned.some(c => idKeys.some(k => c.includes(k)));
+    const hasName = cleaned.some(c => nameKeys.some(k => c.includes(k)));
+    const hasScore = cleaned.some(c => scoreKeys.some(k => c.includes(k)));
+    // 至少要找到学号/姓名之一，并且要有成绩相关列（或学号列）才认为是表头
+    if ((hasId || hasName) && (hasId || hasScore)) return i;
+  }
+  return 0;
 }
 
 // 从列名推断字段key
@@ -1406,8 +1431,11 @@ function readExcelFile(file) {
       try {
         const wb = XLSX.read(e.target.result, { type: 'array' });
         const ws = wb.Sheets[wb.SheetNames[0]];
+        // 先读前 20 行（无表头）自动检测真正的表头行，兼容第一行是标题/空行/合并单元格的情况
+        const preview = XLSX.utils.sheet_to_json(ws, { header: 1, range: 0, defval: '', raw: false });
+        const headerIndex = findHeaderIndex(preview);
         // raw: false 保留 Excel 中显示的文本格式，避免长数字学号被转成数字格式
-        const data = XLSX.utils.sheet_to_json(ws, { defval: '', raw: false });
+        const data = XLSX.utils.sheet_to_json(ws, { defval: '', raw: false, range: headerIndex });
         resolve(data);
       } catch (err) { reject(err); }
     };
@@ -2434,21 +2462,41 @@ async function handleGradeExcelImport(file) {
     const data = await readExcelFile(file);
     if (!data || data.length === 0) { hideLoading(); showToast('文件为空或格式不正确', 'error'); return; }
     const first = data[0];
+    const keys = Object.keys(first || {});
+    const cleanKeys = keys.map(k => cleanColumnName(k));
     const colOf = (candidates) => {
       for (const c of candidates) {
-        if (first.hasOwnProperty(c)) return c;
-        const hit = Object.keys(first).find(k => k.replace(/\s/g, '').includes(c.replace(/\s/g, '')));
-        if (hit) return hit;
+        const cleanC = cleanColumnName(c);
+        // 精确匹配清理后的列名
+        const exact = keys.find(k => cleanColumnName(k) === cleanC);
+        if (exact != null) return exact;
+      }
+      // 模糊匹配：清理后的候选被包含在列名中
+      for (const c of candidates) {
+        const cleanC = cleanColumnName(c);
+        const hit = keys.find(k => cleanColumnName(k).includes(cleanC));
+        if (hit != null) return hit;
       }
       return null;
     };
-    const sidCol = colOf(['学号', '考号', '考生号']) || Object.keys(first)[0];
+    const sidCol = colOf(['学号', '考号', '考生号', '学籍号']);
     const nameCol = colOf(['姓名', '学生姓名', '名字']);
     const semCol = colOf(['学期', '学年学期', '学期名称']);
-    const scoreCol = colOf(['学分加权平均分', '加权总分', '学业加权总分', '加权平均成绩', '加权平均分', '总分', '成绩']) || Object.keys(first).find(k => k.includes('分'));
+    const scoreCol = colOf(['学分加权平均分', '加权总分', '学业加权总分', '加权平均成绩', '加权平均分', '总分', '成绩']) || keys.find(k => cleanColumnName(k).includes('分'));
     const rankCol = colOf(['排名', '总排名', '名次', '位次']);
 
-    if (!scoreCol) { hideLoading(); showToast('未能识别分数列，请检查表头是否包含“学分加权平均分”或“加权总分”等', 'error'); return; }
+    if (!scoreCol) {
+      hideLoading();
+      const headPreview = keys.slice(0, 10).join('、') || '（空）';
+      showToast(`未能识别分数列。识别到的表头：${headPreview}。请检查表头是否包含“学分加权平均分”或“加权总分”等`, 'error');
+      return;
+    }
+    if (!sidCol && !nameCol) {
+      hideLoading();
+      const headPreview = keys.slice(0, 10).join('、') || '（空）';
+      showToast(`未能识别学号或姓名列。识别到的表头：${headPreview}`, 'error');
+      return;
+    }
 
     let semesterBase = '';
     if (!semCol) {
@@ -2486,20 +2534,24 @@ async function handleGradeExcelImport(file) {
     let unmatched = 0;
     const unmatchedSamples = [];
     for (const row of data) {
-      const sidRaw = String(row[sidCol] || '').trim();
+      const sidRaw = sidCol ? String(row[sidCol] || '') : '';
       const sid = normalizeStudentId(sidRaw);
       const nm = nameCol ? String(row[nameCol] || '').trim() : '';
       const student = (sid && bySid[sid]) || (nm && byName[nm]) || null;
       if (!student) {
         unmatched++;
-        if (unmatchedSamples.length < 5) unmatchedSamples.push(sid || nm || '未知');
+        if (unmatchedSamples.length < 5) {
+          const label = sid || nm || `行数据空(${Object.values(row).slice(0, 3).join(',')})`;
+          unmatchedSamples.push(label);
+        }
         continue;
       }
       let semester = semCol ? String(row[semCol] || '').trim() : semesterBase;
       if (useSemPrompt && semesterBase) { const n = parseInt(semester, 10); if ([1, 2].includes(n)) semester = semesterBase + '-' + n; }
+      if (!semester) { unmatched++; continue; }
       const score = parseFloat(String(row[scoreCol] || '').replace(/[^\d.]/g, ''));
       const rank = rankCol ? parseInt(String(row[rankCol] || '').replace(/[^\d]/g, ''), 10) : null;
-      if (isNaN(score)) continue;
+      if (isNaN(score)) { unmatched++; continue; }
       const key = String(student.id) + '__' + semester;
       const rec = { studentId: String(student.id), semester, weightedScore: score, overallRank: (rank && !isNaN(rank)) ? rank : null, className: student.className || '', updatedAt: Date.now() };
       if (existByKey[key]) { rec.id = existByKey[key].id; rec.createdAt = existByKey[key].createdAt || Date.now(); toUpdate.push(rec); }
@@ -2510,10 +2562,12 @@ async function handleGradeExcelImport(file) {
     if (toAdd.length) await dbAddBatch('grades', toAdd);
 
     hideLoading();
+    const headInfo = `识别列：学号=${sidCol || '无'}, 姓名=${nameCol || '无'}, 分数=${scoreCol || '无'}, 学期=${semCol || '无'}, 排名=${rankCol || '无'}`;
+    console.log('[成绩导入]', headInfo, '数据行数', data.length, '未匹配样例', unmatchedSamples);
     let msg = `导入完成：新增 ${toAdd.length} 条，更新 ${toUpdate.length} 条`;
     if (unmatched > 0) {
-      msg += `，${unmatched} 人未匹配（${unmatchedSamples.join('、')}等）`;
-      if (unmatched === data.length) msg += '。请先到「学生管理」导入学生基础信息，再导入成绩排名。';
+      msg += `，${unmatched} 人未匹配（${unmatchedSamples.join('、')}等）。请确认「学生管理」中的学号/姓名与成绩表一致。`;
+      if (unmatched === data.length) msg += '若刚导入学生信息，请强制刷新（Cmd+Shift+R / Ctrl+F5）后再试。';
     }
     showToast(msg, unmatched === data.length ? 'error' : (unmatched > 0 ? 'warning' : 'success'));
     state.grades = (await dbGetAll('grades')).filter(g => g && typeof g.weightedScore === 'number');
