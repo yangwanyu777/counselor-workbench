@@ -99,13 +99,17 @@ async function pushToCloud() {
 
   try {
     const localData = await exportAllData();
-    const { error } = await supabaseClient
-      .from('workbench_data')
-      .upsert({
-        user_id: user.id,
-        data: localData,
-        updated_at: new Date().toISOString()
-      }, { onConflict: 'user_id' });
+    const { error } = await withTimeout(
+      supabaseClient
+        .from('workbench_data')
+        .upsert({
+          user_id: user.id,
+          data: localData,
+          updated_at: new Date().toISOString()
+        }, { onConflict: 'user_id' }),
+      15000,
+      '数据上传'
+    );
 
     if (error) throw error;
     syncState.lastSync = new Date();
@@ -128,11 +132,15 @@ async function pullFromCloud() {
   const user = await getCurrentUser();
   if (!user) return null;
 
-  const { data, error } = await supabaseClient
-    .from('workbench_data')
-    .select('data, updated_at')
-    .eq('user_id', user.id)
-    .maybeSingle();
+  const { data, error } = await withTimeout(
+    supabaseClient
+      .from('workbench_data')
+      .select('data, updated_at')
+      .eq('user_id', user.id)
+      .maybeSingle(),
+    15000,
+    '数据下载'
+  );
 
   if (error) throw error;
   if (data && data.data) {
@@ -145,7 +153,7 @@ async function pullFromCloud() {
 }
 
 // 智能同步（登录后自动调用）
-async function smartSync() {
+async function smartSync(retries = 2) {
   if (!isSupabaseReady()) return 'disabled';
   const user = await getCurrentUser();
   if (!user) return 'nouser';
@@ -162,13 +170,18 @@ async function smartSync() {
       .select('data, updated_at')
       .eq('user_id', user.id)
       .maybeSingle(),
-    12000,
+    20000,
     '云端查询'
   );
 
   if (error && error.code !== 'PGRST116') {
     console.error('[Sync] 查询云端数据失败:', error);
-    return 'error';
+    if (retries > 0) {
+      console.log('[Sync] 将在 5 秒后重试...');
+      await new Promise(r => setTimeout(r, 5000));
+      return smartSync(retries - 1);
+    }
+    throw new Error('云端查询失败：' + (error.message || error.code || '未知错误'));
   }
 
   const hasCloudData = cloudData && cloudData.data && (
@@ -176,20 +189,30 @@ async function smartSync() {
     (cloudData.data.settings && cloudData.data.settings.length > 0)
   );
 
-  if (hasCloudData && !hasLocalData) {
-    // 云端有，本地没有 → 拉取
-    await pullFromCloud();
-    return 'pulled';
-  } else if (!hasCloudData && hasLocalData) {
-    // 本地有，云端没有 → 推送
-    await pushToCloud();
-    return 'pushed';
-  } else if (hasCloudData && hasLocalData) {
-    // 两边都有 → 以云端为准（先拉取，再推送本地增量）
-    await pullFromCloud();
-    // 拉取后如果有本地新数据，再推送
-    setTimeout(() => pushToCloud(), 500);
-    return 'synced';
+  try {
+    if (hasCloudData && !hasLocalData) {
+      // 云端有，本地没有 → 拉取
+      await pullFromCloud();
+      return 'pulled';
+    } else if (!hasCloudData && hasLocalData) {
+      // 本地有，云端没有 → 推送
+      await pushToCloud();
+      return 'pushed';
+    } else if (hasCloudData && hasLocalData) {
+      // 两边都有 → 以云端为准（先拉取，再推送本地增量）
+      await pullFromCloud();
+      // 拉取后如果有本地新数据，再推送
+      setTimeout(() => pushToCloud(), 500);
+      return 'synced';
+    }
+  } catch (e) {
+    console.error('[Sync] 同步操作失败:', e);
+    if (retries > 0) {
+      console.log('[Sync] 将在 5 秒后重试...');
+      await new Promise(r => setTimeout(r, 5000));
+      return smartSync(retries - 1);
+    }
+    throw e;
   }
   return 'empty';
 }
@@ -227,18 +250,25 @@ function updateSyncIndicator() {
   }
 }
 
-// 手动触发同步
+// 手动触发同步（先拉取云端，再推送本地，确保双向一致）
 async function manualSync() {
   if (!isSupabaseReady()) {
     showToast('未配置云端同步', 'error');
     return;
   }
   showToast('正在同步数据...', 'info');
-  const ok = await pushToCloud();
-  if (ok) {
-    showToast('数据同步成功', 'success');
-  } else {
-    showToast('同步失败，请检查网络', 'error');
+  try {
+    const result = await smartSync(0);
+    if (result === 'disabled' || result === 'nouser') {
+      showToast('请先登录后再同步', 'error');
+    } else if (['pulled', 'pushed', 'synced', 'empty'].includes(result)) {
+      showToast('数据同步成功', 'success');
+    } else {
+      showToast('同步失败，请检查网络', 'error');
+    }
+  } catch (e) {
+    console.error('[Sync] 手动同步失败:', e);
+    showToast('同步失败：' + (e.message || '请检查网络'), 'error');
   }
 }
 
