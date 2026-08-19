@@ -379,9 +379,14 @@ async function init() {
       smartSync().then(syncResult => {
         if (syncResult === 'pulled' || syncResult === 'synced') showToast('已从云端恢复数据', 'success');
         else if (syncResult === 'pushed') showToast('本地数据已上传云端', 'success');
+        else if (syncResult === 'error') {
+          showToast('云端同步失败，10秒后自动重试', 'info');
+          setTimeout(() => retryBackgroundSync(2), 10000);
+        }
       }).catch(e => {
         console.warn('云端同步失败，本次以本地数据运行:', e);
-        showToast('云端暂时无法连接，本次以本设备数据离线运行', 'info');
+        showToast('云端暂时无法连接，10秒后自动重试', 'info');
+        setTimeout(() => retryBackgroundSync(2), 10000);
       });
     } else {
       // 未登录，显示登录界面
@@ -445,9 +450,14 @@ async function handleLogin() {
         if (syncResult === 'pulled') showToast('已从云端恢复数据', 'success');
         else if (syncResult === 'pushed') showToast('本地数据已上传云端', 'success');
         else if (syncResult === 'synced') showToast('数据已同步', 'success');
+        else if (syncResult === 'error') {
+          showToast('云端同步失败，10秒后自动重试（本机数据可用）', 'info');
+          setTimeout(() => retryBackgroundSync(2), 10000);
+        }
       }).catch(syncErr => {
         console.warn('后台同步失败，使用本地数据:', syncErr);
         showToast('已进入页面，云端同步稍后自动重试（本机数据可用）', 'info');
+        setTimeout(() => retryBackgroundSync(2), 10000);
       });
       return;
     } catch (e) {
@@ -549,6 +559,20 @@ async function handleLogout() {
   if (emailEl) emailEl.value = '';
   document.getElementById('loginPassword').value = '';
   document.getElementById('loginError').textContent = '';
+}
+
+// 后台自动重试同步
+async function retryBackgroundSync(retries) {
+  if (!isSupabaseReady() || !syncState.userEmail) return;
+  try {
+    const result = await smartSync(retries);
+    if (result === 'pulled') showToast('重试成功：已从云端恢复数据', 'success');
+    else if (result === 'pushed') showToast('重试成功：本地数据已上传云端', 'success');
+    else if (result === 'synced') showToast('重试成功：数据已同步', 'success');
+  } catch (e) {
+    console.warn('后台重试同步仍失败:', e);
+    showToast('云端仍无法连接，数据仅在本地可用', 'info');
+  }
 }
 
 function showApp() {
