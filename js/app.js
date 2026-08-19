@@ -2416,7 +2416,7 @@ function computeClassRankChanges() {
       if (prev.rank == null || cur.rank == null) return;
       const delta = prev.rank - cur.rank; // 正值=进步（排名数字变小）
       if (delta === 0) return;
-      changes.push({ name: cur.st.name, delta, curRank: cur.rank, prevRank: prev.rank, prevSem: prev.semester, curSem: cur.semester });
+      changes.push({ id: cur.st.id, name: cur.st.name, delta, curRank: cur.rank, prevRank: prev.rank, prevSem: prev.semester, curSem: cur.semester });
     });
     const improvements = changes.filter(c => c.delta > 0).sort((a, b) => b.delta - a.delta).slice(0, 5);
     const declines = changes.filter(c => c.delta < 0).sort((a, b) => a.delta - b.delta).slice(0, 5);
@@ -2435,11 +2435,28 @@ function renderRankChangeTables(clsData, type) {
       const diff = type === 'improve' ? c.delta : Math.abs(c.delta);
       const tagCls = type === 'improve' ? 'tag-green' : 'tag-red';
       const sign = type === 'improve' ? '▲' : '▼';
-      rows.push(`<tr><td>${cls}</td><td>${c.name}</td><td><span class="tag ${tagCls}">${sign}${diff}</span></td><td>${c.curRank}</td></tr>`);
+      rows.push(`<tr class="row-clickable" title="点击查看 ${c.name} 的成绩趋势" onclick="jumpToTrend('${c.id}')"><td>${cls}</td><td>${c.name}</td><td><span class="tag ${tagCls}">${sign}${diff}</span></td><td>${c.curRank}</td></tr>`);
     });
   });
   if (rows.length === 0) return '<div class="empty-text" style="padding:8px 0">暂无排名变化数据（需至少两个学期且含名次）</div>';
   return `<div class="table-wrapper"><table class="data-table"><thead><tr><th>班级</th><th>姓名</th><th>${type === 'improve' ? '进步名次' : '退步名次'}</th><th>当前排位</th></tr></thead><tbody>${rows.join('')}</tbody></table></div>`;
+}
+
+// 点击进步/退步榜单中的学生，定位到其成绩趋势
+function jumpToTrend(studentId) {
+  const input = document.getElementById('gradeTrendSearch');
+  const sel = document.getElementById('gradeTrendStudent');
+  if (!input || !sel) return;
+  const st = (state.students || []).find(s => String(s.id) === String(studentId));
+  if (!st) return;
+  // 用学号精确搜索（学号唯一），自动选中该生并刷新趋势图
+  input.value = st.studentId || st.name || '';
+  filterGradeTrendStudents();
+  if (sel.value !== String(studentId)) sel.value = String(studentId);
+  updateGradeTrend();
+  // 平滑滚动到趋势图，方便查看
+  const chart = document.getElementById('gradeTrendChart');
+  if (chart) chart.scrollIntoView({ behavior: 'smooth', block: 'center' });
 }
 
 function updateGradeTrend() {
