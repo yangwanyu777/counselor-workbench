@@ -2327,7 +2327,20 @@ function renderGradeTrend() {
     container.innerHTML = '<div class="empty-state"><div class="empty-icon">📈</div><div class="empty-text">暂无成绩排名数据</div></div>';
     return;
   }
+  const rankChanges = computeClassRankChanges();
   container.innerHTML = `
+    <div class="rank-change-grid">
+      <div class="card" style="padding:16px">
+        <div class="card-title">🏆 各班进步最大 Top5</div>
+        <div class="card-subtitle" style="margin:4px 0 10px">对比口径：每位同学最近两个学期的排名变化（排名数字越小越靠前）</div>
+        ${renderRankChangeTables(rankChanges, 'improve')}
+      </div>
+      <div class="card" style="padding:16px">
+        <div class="card-title">📉 各班退步最大 Top5</div>
+        <div class="card-subtitle" style="margin:4px 0 10px">对比口径：每位同学最近两个学期的排名变化（排名数字越小越靠前）</div>
+        ${renderRankChangeTables(rankChanges, 'decline')}
+      </div>
+    </div>
     <div class="filter-bar">
       <input type="text" class="input" id="gradeTrendSearch" placeholder="🔍 输入姓名或学号搜索…" oninput="filterGradeTrendStudents()" style="min-width:200px" />
       <select class="select" id="gradeTrendStudent" onchange="updateGradeTrend()"></select>
@@ -2376,6 +2389,57 @@ function clearGradeTrendSearch() {
   if (input) input.value = '';
   filterGradeTrendStudents();
   if (input) input.focus();
+}
+
+// 计算各班学期间排名进步/退步 Top5（对比每个学生最近两个有记录的学期）
+function computeClassRankChanges() {
+  const studentMap = {};
+  state.students.forEach(s => { studentMap[s.id] = s; });
+  // 按班级归集每个学生的学期记录
+  const byClass = {};
+  state.grades.forEach(g => {
+    const st = studentMap[g.studentId];
+    if (!st) return;
+    const cls = (st.className || '').trim() || '未分班';
+    (byClass[cls] = byClass[cls] || []).push({ st, semester: g.semester, rank: g.overallRank });
+  });
+  const result = {};
+  Object.keys(byClass).sort().forEach(cls => {
+    const perStudent = {};
+    byClass[cls].forEach(r => { (perStudent[r.st.id] = perStudent[r.st.id] || []).push(r); });
+    const changes = [];
+    Object.keys(perStudent).forEach(uid => {
+      const list = perStudent[uid].sort((a, b) => a.semester.localeCompare(b.semester));
+      if (list.length < 2) return;
+      const prev = list[list.length - 2];
+      const cur = list[list.length - 1];
+      if (prev.rank == null || cur.rank == null) return;
+      const delta = prev.rank - cur.rank; // 正值=进步（排名数字变小）
+      if (delta === 0) return;
+      changes.push({ name: cur.st.name, delta, curRank: cur.rank, prevRank: prev.rank, prevSem: prev.semester, curSem: cur.semester });
+    });
+    const improvements = changes.filter(c => c.delta > 0).sort((a, b) => b.delta - a.delta).slice(0, 5);
+    const declines = changes.filter(c => c.delta < 0).sort((a, b) => a.delta - b.delta).slice(0, 5);
+    if (improvements.length || declines.length) result[cls] = { improvements, declines };
+  });
+  return result;
+}
+
+// 渲染进步/退步榜表格（按班级聚合）
+function renderRankChangeTables(clsData, type) {
+  const key = type === 'improve' ? 'improvements' : 'declines';
+  const rows = [];
+  Object.keys(clsData).sort().forEach(cls => {
+    const arr = clsData[cls][key] || [];
+    arr.forEach(c => {
+      const diff = type === 'improve' ? c.delta : Math.abs(c.delta);
+      const tagCls = type === 'improve' ? 'tag-green' : 'tag-red';
+      const sign = type === 'improve' ? '▲' : '▼';
+      rows.push(`<tr><td>${cls}</td><td>${c.name}</td><td><span class="tag ${tagCls}">${sign}${diff}</span></td><td>${c.curRank}</td></tr>`);
+    });
+  });
+  if (rows.length === 0) return '<div class="empty-text" style="padding:8px 0">暂无排名变化数据（需至少两个学期且含名次）</div>';
+  return `<div class="table-wrapper"><table class="data-table"><thead><tr><th>班级</th><th>姓名</th><th>${type === 'improve' ? '进步名次' : '退步名次'}</th><th>当前排位</th></tr></thead><tbody>${rows.join('')}</tbody></table></div>`;
 }
 
 function updateGradeTrend() {
