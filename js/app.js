@@ -2447,18 +2447,34 @@ async function handleGradeExcelImport(file) {
     const sidCol = colOf(['学号', '考号', '考生号']) || Object.keys(first)[0];
     const nameCol = colOf(['姓名', '学生姓名', '名字']);
     const semCol = colOf(['学期', '学年学期', '学期名称']);
-    const scoreCol = colOf(['加权总分', '学业加权总分', '加权平均成绩', '总分', '成绩']) || Object.keys(first).find(k => k.includes('分'));
+    const scoreCol = colOf(['学分加权平均分', '加权总分', '学业加权总分', '加权平均成绩', '加权平均分', '总分', '成绩']) || Object.keys(first).find(k => k.includes('分'));
     const rankCol = colOf(['排名', '总排名', '名次', '位次']);
 
-    let useSemPrompt = false, semesterBase = '';
-    const sampleSem = String(data.find(r => r[semCol])?.[semCol] || '');
-    const semNum = parseInt(sampleSem, 10);
-    if (String(semNum) === sampleSem.replace(/\s/g, '') && [1, 2].includes(semNum)) {
-      useSemPrompt = true;
-      const base = await showPromptModal('成绩导入', '检测到学期列为数字 1/2，请输入学年基准', '如：2025-2026', '2025-2026');
+    if (!scoreCol) { hideLoading(); showToast('未能识别分数列，请检查表头是否包含“学分加权平均分”或“加权总分”等', 'error'); return; }
+
+    let semesterBase = '';
+    if (!semCol) {
+      hideLoading();
+      const base = await showPromptModal('成绩导入', '表格中没有“学期”列，请手动输入本次导入的学期', '如：2025-2026-1', '2025-2026-1');
+      showLoading('正在解析成绩排名Excel...');
       if (!base) { hideLoading(); return; }
       semesterBase = base.trim();
-      if (!/^\d{4}-\d{4}$/.test(semesterBase)) { hideLoading(); showToast('学年基准格式应为 2025-2026，请重新导入', 'error'); return; }
+      if (!semesterBase) { hideLoading(); showToast('学期名称不能为空', 'error'); return; }
+    }
+
+    let useSemPrompt = false;
+    if (semCol) {
+      const sampleSem = String(data.find(r => r[semCol])?.[semCol] || '');
+      const semNum = parseInt(sampleSem, 10);
+      if (String(semNum) === sampleSem.replace(/\s/g, '') && [1, 2].includes(semNum)) {
+        useSemPrompt = true;
+        hideLoading();
+        const base = await showPromptModal('成绩导入', '检测到学期列为数字 1/2，请输入学年基准', '如：2025-2026', '2025-2026');
+        showLoading('正在解析成绩排名Excel...');
+        if (!base) { hideLoading(); return; }
+        semesterBase = base.trim();
+        if (!/^\d{4}-\d{4}$/.test(semesterBase)) { hideLoading(); showToast('学年基准格式应为 2025-2026，请重新导入', 'error'); return; }
+      }
     }
 
     const students = await dbGetAll('students');
@@ -2470,13 +2486,18 @@ async function handleGradeExcelImport(file) {
 
     const toAdd = [], toUpdate = [];
     let unmatched = 0;
+    const unmatchedSamples = [];
     for (const row of data) {
-      const sidRaw = String(row[sidCol] || (nameCol ? row[nameCol] : '') || '').trim();
+      const sidRaw = String(row[sidCol] || '').trim();
       const sid = normalizeStudentId(sidRaw);
       const nm = nameCol ? String(row[nameCol] || '').trim() : '';
       const student = (sid && bySid[sid]) || (nm && byName[nm]) || null;
-      if (!student) { unmatched++; continue; }
-      let semester = semCol ? String(row[semCol] || '').trim() : '未命名学期';
+      if (!student) {
+        unmatched++;
+        if (unmatchedSamples.length < 5) unmatchedSamples.push(sid || nm || '未知');
+        continue;
+      }
+      let semester = semCol ? String(row[semCol] || '').trim() : semesterBase;
       if (useSemPrompt && semesterBase) { const n = parseInt(semester, 10); if ([1, 2].includes(n)) semester = semesterBase + '-' + n; }
       const score = parseFloat(String(row[scoreCol] || '').replace(/[^\d.]/g, ''));
       const rank = rankCol ? parseInt(String(row[rankCol] || '').replace(/[^\d]/g, ''), 10) : null;
@@ -2491,7 +2512,12 @@ async function handleGradeExcelImport(file) {
     if (toAdd.length) await dbAddBatch('grades', toAdd);
 
     hideLoading();
-    showToast(`导入完成：新增 ${toAdd.length} 条，更新 ${toUpdate.length} 条${unmatched > 0 ? `，${unmatched} 人未匹配` : ''}`, 'success');
+    let msg = `导入完成：新增 ${toAdd.length} 条，更新 ${toUpdate.length} 条`;
+    if (unmatched > 0) {
+      msg += `，${unmatched} 人未匹配（${unmatchedSamples.join('、')}等）`;
+      if (unmatched === data.length) msg += '。请先到「学生管理」导入学生基础信息，再导入成绩排名。';
+    }
+    showToast(msg, unmatched === data.length ? 'error' : (unmatched > 0 ? 'warning' : 'success'));
     state.grades = (await dbGetAll('grades')).filter(g => g && typeof g.weightedScore === 'number');
     navigateTo('grades');
   } catch (err) {
