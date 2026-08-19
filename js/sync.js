@@ -43,9 +43,21 @@ async function supabaseSignUp(email, password) {
   return data;
 }
 
+// 带超时的 Promise（云端请求可能很慢，避免无限等待卡死界面）
+function withTimeout(promise, ms, label) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => setTimeout(() => reject(new Error((label || '请求') + '超时，云端响应过慢')), ms))
+  ]);
+}
+
 // 邮箱密码登录
 async function supabaseSignIn(email, password) {
-  const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
+  const { data, error } = await withTimeout(
+    supabaseClient.auth.signInWithPassword({ email, password }),
+    12000,
+    '登录请求'
+  );
   if (error) throw error;
   syncState.userEmail = email;
   return data;
@@ -144,11 +156,15 @@ async function smartSync() {
   const hasLocalData = localStudentCount > 0 || localSettings.length > 0;
 
   // 检查云端是否有数据
-  const { data: cloudData, error } = await supabaseClient
-    .from('workbench_data')
-    .select('data, updated_at')
-    .eq('user_id', user.id)
-    .maybeSingle();
+  const { data: cloudData, error } = await withTimeout(
+    supabaseClient
+      .from('workbench_data')
+      .select('data, updated_at')
+      .eq('user_id', user.id)
+      .maybeSingle(),
+    12000,
+    '云端查询'
+  );
 
   if (error && error.code !== 'PGRST116') {
     console.error('[Sync] 查询云端数据失败:', error);
