@@ -460,6 +460,13 @@ table.data-table tbody tr.row-clickable { cursor: pointer; }
   margin-bottom: 16px;
 }
 
+.rank-change-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
 .stat-card {
   background: #fff;
   border-radius: var(--radius-md);
@@ -470,8 +477,7 @@ table.data-table tbody tr.row-clickable { cursor: pointer; }
   flex-direction: column;
   min-width: 0;
   flex: 0 1 280px;
-  max-width: 280px;
-  overflow: hidden;
+  max-width: 280px;  overflow: hidden;
 }
 
 .stat-card .stat-main {
