@@ -2283,6 +2283,10 @@ function renderGradeRanking() {
       <select class="select" id="gradeSemester" onchange="updateGradeRanking()">
         ${semesters.map(s => `<option value="${s}">${s}</option>`).join('')}
       </select>
+      <select class="select" id="gradeYearFilter" onchange="updateGradeRanking()">
+        <option value="">全部年级</option>
+        ${[...new Set(state.students.map(s => s.year).filter(Boolean))].sort().map(y => `<option value="${y}">${y}</option>`).join('')}
+      </select>
       <select class="select" id="gradeClassFilter" onchange="updateGradeRanking()">
         <option value="">全部班级</option>
         ${[...new Set(state.students.map(s => s.className).filter(Boolean))].sort().map(c => `<option value="${c}">${c}</option>`).join('')}
@@ -2300,18 +2304,20 @@ function renderGradeRanking() {
 
 function updateGradeRanking() {
   const semester = document.getElementById('gradeSemester').value;
+  const yearFilter = document.getElementById('gradeYearFilter')?.value || '';
   const classFilter = document.getElementById('gradeClassFilter')?.value || '';
   const studentMap = {};
   state.students.forEach(s => { studentMap[s.id] = s; });
   let rows = state.grades.filter(g => g.semester === semester).map(g => {
     const st = studentMap[g.studentId];
     if (!st) return null;
+    if (yearFilter && (st.year || '') !== yearFilter) return null;
     if (classFilter && st.className !== classFilter) return null;
     return { st, score: g.weightedScore, rank: g.overallRank };
   }).filter(Boolean);
   rows.sort((a, b) => ((a.rank != null ? a.rank : 9999) - (b.rank != null ? b.rank : 9999)) || ((b.score || 0) - (a.score || 0)));
   document.getElementById('gradeRankBody').innerHTML = rows.map((r, i) => `
-    <tr class="row-clickable" onclick="showStudentDetail(${r.st.id})">
+    <tr class="row-clickable" title="点击查看 ${r.st.name} 的成绩趋势" onclick="navigateToTrend(${r.st.id})">
       <td><span class="tag ${i < 3 ? 'tag-red' : 'tag-blue'}">${r.rank != null ? r.rank : i + 1}</span></td>
       <td>${r.st.studentId}</td>
       <td>${r.st.name}</td>
@@ -2459,6 +2465,14 @@ function jumpToTrend(studentId) {
   if (chart) chart.scrollIntoView({ behavior: 'smooth', block: 'center' });
 }
 
+// 从成绩排名列表点击学生，先切到趋势分析 tab，再定位到该生趋势
+function navigateToTrend(studentId) {
+  const trendBtn = document.querySelector('#gradeTabs .tab[onclick*="trend"]');
+  if (trendBtn && !trendBtn.classList.contains('active')) trendBtn.click();
+  // 切到趋势 tab 后 DOM 已同步渲染，直接跳转定位
+  if (document.getElementById('gradeTrendSearch')) jumpToTrend(studentId);
+}
+
 function updateGradeTrend() {
   const sid = document.getElementById('gradeTrendStudent').value;
   const studentMap = {};
@@ -2501,9 +2515,9 @@ function renderGradeCompare() {
   }
   container.innerHTML = `
     <div class="filter-bar">
-      <select class="select" id="compareStudent" onchange="updateGradeCompare()">
-        ${state.students.slice().sort((a, b) => (a.className || '').localeCompare(b.className || '')).map(s => `<option value="${s.id}">${(s.className || '')} ${s.name}（${s.studentId}）</option>`).join('')}
-      </select>
+      <input type="text" class="input" id="compareSearch" placeholder="🔍 输入姓名或学号搜索…" oninput="filterCompareStudents()" style="min-width:200px" />
+      <select class="select" id="compareStudent" onchange="updateGradeCompare()"></select>
+      <button class="btn btn-outline" onclick="clearCompareSearch()">清除</button>
     </div>
     <div class="chart-container"><canvas id="compareChart"></canvas></div>
     <div class="table-wrapper" style="margin-top:12px">
@@ -2513,7 +2527,7 @@ function renderGradeCompare() {
       </table>
     </div>
   `;
-  updateGradeCompare();
+  filterCompareStudents();
 }
 
 function updateGradeCompare() {
@@ -2569,6 +2583,31 @@ function updateGradeCompare() {
       }
     });
   }
+}
+
+// 学业vs综测对比：根据搜索关键词过滤学生下拉列表（复用 renderTrendStudentOptions）
+function filterCompareStudents() {
+  const input = document.getElementById('compareSearch');
+  const sel = document.getElementById('compareStudent');
+  if (!input || !sel) return;
+  const kw = input.value;
+  sel.innerHTML = renderTrendStudentOptions(kw);
+  if (sel.options.length > 0) {
+    sel.selectedIndex = 0;
+    updateGradeCompare();
+  } else {
+    const body = document.getElementById('compareBody');
+    if (body) body.innerHTML = '<tr><td colspan="6">未找到匹配的学生</td></tr>';
+    const ctx = document.getElementById('compareChart');
+    if (ctx && state.charts.compare) { state.charts.compare.destroy(); state.charts.compare = null; }
+  }
+}
+
+function clearCompareSearch() {
+  const input = document.getElementById('compareSearch');
+  if (input) input.value = '';
+  filterCompareStudents();
+  if (input) input.focus();
 }
 
 async function handleGradeExcelImport(file) {
