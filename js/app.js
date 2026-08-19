@@ -2329,9 +2329,9 @@ function renderGradeTrend() {
   }
   container.innerHTML = `
     <div class="filter-bar">
-      <select class="select" id="gradeTrendStudent" onchange="updateGradeTrend()">
-        ${state.students.slice().sort((a, b) => (a.className || '').localeCompare(b.className || '')).map(s => `<option value="${s.id}">${(s.className || '')} ${s.name}（${s.studentId}）</option>`).join('')}
-      </select>
+      <input type="text" class="input" id="gradeTrendSearch" placeholder="🔍 输入姓名或学号搜索…" oninput="filterGradeTrendStudents()" style="min-width:200px" />
+      <select class="select" id="gradeTrendStudent" onchange="updateGradeTrend()"></select>
+      <button class="btn btn-outline" onclick="clearGradeTrendSearch()">清除</button>
     </div>
     <div class="chart-container"><canvas id="gradeTrendChart"></canvas></div>
     <div class="table-wrapper" style="margin-top:12px">
@@ -2341,7 +2341,41 @@ function renderGradeTrend() {
       </table>
     </div>
   `;
-  updateGradeTrend();
+  filterGradeTrendStudents();
+}
+
+// 根据搜索关键词过滤趋势分析的学生下拉列表
+function renderTrendStudentOptions(keyword) {
+  const kw = (keyword || '').trim().toLowerCase();
+  const list = state.students.filter(s => {
+    if (!kw) return true;
+    return String(s.studentId).toLowerCase().includes(kw) || String(s.name).toLowerCase().includes(kw);
+  }).sort((a, b) => (a.className || '').localeCompare(b.className || ''));
+  return list.map(s => `<option value="${s.id}">${(s.className || '')} ${s.name}（${s.studentId}）</option>`).join('');
+}
+
+function filterGradeTrendStudents() {
+  const input = document.getElementById('gradeTrendSearch');
+  const sel = document.getElementById('gradeTrendStudent');
+  if (!input || !sel) return;
+  const kw = input.value;
+  sel.innerHTML = renderTrendStudentOptions(kw);
+  if (sel.options.length > 0) {
+    sel.selectedIndex = 0;
+    updateGradeTrend();
+  } else {
+    const body = document.getElementById('gradeTrendBody');
+    if (body) body.innerHTML = '<tr><td colspan="3">未找到匹配的学生</td></tr>';
+    const ctx = document.getElementById('gradeTrendChart');
+    if (ctx && state.charts.gradeTrend) { state.charts.gradeTrend.destroy(); state.charts.gradeTrend = null; }
+  }
+}
+
+function clearGradeTrendSearch() {
+  const input = document.getElementById('gradeTrendSearch');
+  if (input) input.value = '';
+  filterGradeTrendStudents();
+  if (input) input.focus();
 }
 
 function updateGradeTrend() {
