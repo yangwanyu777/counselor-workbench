@@ -349,14 +349,15 @@ async function init() {
       console.warn('读取本地登录会话失败:', e);
     }
     if (user) {
-      // 已登录，自动进入并同步（云端不可达时降级为离线使用，不阻塞进入）
-      try {
-        await smartSync();
-      } catch (e) {
+      // 已登录，立即进入页面，云端同步放到后台执行，避免云端慢时卡在加载界面
+      showApp();
+      smartSync().then(syncResult => {
+        if (syncResult === 'pulled' || syncResult === 'synced') showToast('已从云端恢复数据', 'success');
+        else if (syncResult === 'pushed') showToast('本地数据已上传云端', 'success');
+      }).catch(e => {
         console.warn('云端同步失败，本次以本地数据运行:', e);
         showToast('云端暂时无法连接，本次以本设备数据离线运行', 'info');
-      }
-      showApp();
+      });
     } else {
       // 未登录，显示登录界面
       document.getElementById('loginScreen').style.display = 'flex';
@@ -411,26 +412,23 @@ async function handleLogin() {
 
     try {
       await supabaseSignIn(email, password);
-      let syncResult = 'error';
-      try {
-        syncResult = await smartSync();
-      } catch (syncErr) {
-        console.warn('登录后同步失败，使用本地数据:', syncErr);
-      }
+      // 登录成功，立即进入页面，云端同步放到后台执行，避免云端慢时卡在登录界面
       showApp();
-      if (syncResult === 'pulled') {
-        showToast('登录成功，已从云端恢复数据', 'success');
-      } else if (syncResult === 'pushed') {
-        showToast('登录成功，本地数据已上传云端', 'success');
-      } else if (syncResult === 'synced') {
-        showToast('登录成功，数据已同步', 'success');
-      } else {
-        showToast('登录成功', 'success');
-      }
+      showToast('登录成功，正在后台同步数据…', 'success');
+      // 后台同步（不阻塞页面进入）
+      smartSync().then(syncResult => {
+        if (syncResult === 'pulled') showToast('已从云端恢复数据', 'success');
+        else if (syncResult === 'pushed') showToast('本地数据已上传云端', 'success');
+        else if (syncResult === 'synced') showToast('数据已同步', 'success');
+      }).catch(syncErr => {
+        console.warn('后台同步失败，使用本地数据:', syncErr);
+        showToast('已进入页面，云端同步稍后自动重试（本机数据可用）', 'info');
+      });
+      return;
     } catch (e) {
       const msg = String(e.message || '');
-      if (/load failed|fetch failed|failed to fetch|network|networkerror|timeout|aborted/i.test(msg)) {
-        errorEl.textContent = '云端服务暂时无法连接：免费版 Supabase 项目可能因一段时间未使用被暂停。可先点击下方「离线模式进入」使用本设备数据，稍后登录 supabase.com 在项目页点击 Restore project 恢复。';
+      if (/load failed|fetch failed|failed to fetch|network|networkerror|timeout|aborted|超时/i.test(msg)) {
+        errorEl.textContent = '云端服务暂时无法连接：免费版 Supabase 项目可能因一段时间未使用被暂停（冷启动较慢）。可先点击下方「离线模式进入」使用本设备数据，稍后登录 supabase.com 在项目页点击 Restore project 恢复。';
       } else {
         errorEl.textContent = msg || '登录失败，请检查邮箱和密码';
       }
