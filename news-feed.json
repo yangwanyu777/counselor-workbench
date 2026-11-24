@@ -1,0 +1,28 @@
+{
+  "updatedAt": "2026-11-24",
+  "note": "由每日自动化任务更新；资讯均来自官方渠道，仅供辅导员工作参考",
+  "categories": ["学生工作/思政教育", "就业创业", "奖助学金/资助", "政策新规/安全", "理论研究", "AI赋能辅导员"],
+  "items": [
+    {"category":"学生工作/思政教育","title":"教育部办公厅关于做好2026年高校思想政治工作骨干在职攻读博士学位专项计划工作的通知","url":"https://www.moe.gov.cn/srcsite/A12/s7060/202605/t20260507_1435768.html","source":"教育部","date":"2026-05-07","summary":"2026年思政骨干在职读博专项计划"},
+    {"category":"学生工作/思政教育","title":"教育部办公厅关于启动2026年度高校思想政治工作质量提升综合改革与精品建设项目申报工作的通知","url":"https://www.moe.gov.cn/srcsite/A12/s7060/202602/t20260205_1428390.html","source":"教育部","date":"2026-02-06","summary":"启动2026年度高校思政精品项目申报"},
+    {"category":"学生工作/思政教育","title":"教育部办公厅关于开展全国高校\"两个结合\"青春践行主题作品征集展示的通知","url":"http://www.moe.gov.cn/srcsite/A12/moe_1416/s255/202605/t20260509_1436024.html","source":"教育部","date":"2026-05-09","summary":"面向高校学生征集两个结合主题作品"},
+    {"category":"就业创业","title":"教育部、人力资源社会保障部组织开展2026年高校毕业生就业政策宣传活动","url":"https://www.moe.gov.cn/jyb_xwfb/gzdt_gzdt/s5987/202604/t20260424_1434667.html","source":"教育部","date":"2026-04-24","summary":"部署2026届毕业生就业政策宣传活动"},
+    {"category":"就业创业","title":"教育部等八部门办公厅关于联合开展2026年度高校毕业生等重点群体促就业\"国聘行动\"的通知","url":"https://www.moe.gov.cn/srcsite/A15/s3265/202605/t20260522_1437356.html","source":"教育部","date":"2026-05-22","summary":"八部门联合开展2026年度国聘行动"},
+    {"category":"就业创业","title":"高校毕业生等青年就业服务攻坚行动启动","url":"https://www.moe.gov.cn/jyb_xwfb/s5147/202607/t20260706_1442759.html","source":"教育部","date":"2026-07-06","summary":"启动高校毕业生就业服务攻坚行动"},
+    {"category":"奖助学金/资助","title":"介绍国家助学贷款等学生资助工作情况","url":"https://www.moe.gov.cn/fbh/live/2026/78343/twwd/202607/t20260728_1445368.html","source":"教育部","date":"2026-07-28","summary":"发布会介绍国家助学贷款等资助工作"},
+    {"category":"奖助学金/资助","title":"关于印发《2026年学生资助工作要点》的通知（教助中心〔2026〕17号）","url":"https://www.xszz.edu.cn/n75/c12663/content.html","source":"全国学生资助管理中心","date":"2026-05-08","summary":"印发2026年学生资助工作要点"},
+    {"category":"奖助学金/资助","title":"不让一个学生因家庭经济困难而失学","url":"https://www.moe.gov.cn/fbh/live/2026/78343/mtbd/202607/t20260729_1445445.html","source":"教育部","date":"2026-07-29","summary":"发布会介绍学生资助投入与成效"},
+    {"category":"政策新规/安全","title":"教育部办公厅 中央网信办秘书局关于开展首个全国校园网络文明月活动的通知","url":"https://www.moe.gov.cn/srcsite/A12/s7060/202609/t20260916_1450989.html","source":"教育部","date":"2026-09-14","summary":"开展首个全国校园网络文明月活动"},
+    {"category":"政策新规/安全","title":"教育部办公厅关于落实2026年高校国家安全教育重点任务的通知","url":"https://www.moe.gov.cn/srcsite/A12/s256/202605/t20260525_1437579.html","source":"教育部","date":"2026-03-24","summary":"部署2026年高校国家安全教育任务"},
+    {"category":"政策新规/安全","title":"让\"健康第一\"理念在学校生根开花","url":"https://www.moe.gov.cn/fbh/live/2026/77889/mtbd/202602/t20260228_1429585.html","source":"教育部","date":"2026-02-28","summary":"发布全面推进健康学校建设指导意见"},
+    {"category":"理论研究","title":"教育部社科司关于2026年度教育部人文社会科学研究专项任务项目（高校辅导员研究）申报工作的通知","url":"https://www.sinoss.net/c/2026-06-12/664996.shtml","source":"教育部社会科学司","date":"2026-06-12","summary":"2026年度高校辅导员研究专项申报"},
+    {"category":"理论研究","title":"教育部高校思想政治工作队伍培训研修中心（南京师范大学）关于2026年度委托研究课题招标的通知","url":"https://yxzx.njnu.edu.cn/info/1216/2165.htm","source":"教育部高校思想政治工作队伍培训研修中心","date":"2026-06-01","summary":"南师大2026年度委托研究课题招标"},
+    {"category":"理论研究","title":"关于开展2026年教育部高校思想政治工作创新发展中心专项课题申报工作的通知","url":"https://sizhengwang.cn/a/gsgg/260803/2497804.shtml","source":"全国高校思想政治工作网","date":"2026-08-03","summary":"思政创新发展中心专项课题申报"},
+    {"category":"AI赋能辅导员","title":"\"人工智能+教育\"行动计划启动，促进全社会人工智能通识教育","url":"https://www.moe.gov.cn/fbh/live/2026/77927/mtbd/202604/t20260410_1433391.html","source":"教育部","date":"2026-04-10","summary":"五部门启动AI+教育行动计划"},
+    {"category":"AI赋能辅导员","title":"清华大学探索推动人工智能赋能思想政治教育","url":"https://www.moe.gov.cn/jyb_xwfb/moe_2082/siju/sxzzgzs/sxzzgzjb/202604/t20260427_1434908.html","source":"教育部","date":"2026-04-24","summary":"清华推清小导智慧思政助手"},
+    {"category":"AI赋能辅导员","title":"天津市奏响网络育人主旋律 构建网络思政大格局","url":"https://www.moe.gov.cn/jyb_xwfb/moe_2082/siju/sxzzgzs/sxzzgzjb/202607/t20260715_1443876.html","source":"教育部","date":"2026-07-03","summary":"天津开发AI辅导员智能体"},
+    {"category":"AI赋能辅导员","title":"\"AI学长\"背后的育人实践","url":"https://yurenhao1.sizhengwang.cn/a/sddzzyjsxy/260725/2493816.shtml","source":"全国高校思想政治工作网","date":"2026-07-25","summary":"AI数字人辅导员全时陪伴学生"},
+    {"category":"AI赋能辅导员","title":"AI赋能高校辅导员队伍的\"变\"与\"不变\"","url":"https://www.cnr.cn/jy/gc/20261014/t20261014_527841210.shtml","source":"央广网（光明日报）","date":"2026-10-14","summary":"辅导员应用AI须守伦理边界"},
+    {"category":"AI赋能辅导员","title":"教育部发力建设未来教育空间 未来课堂、未来学校及智能终端直达应用\"最后一公里\"","url":"https://education.news.cn/20260410/7ae1c553bb8949dd8a645b6cdca1fcff/c.html","source":"新华网","date":"2026-04-10","summary":"AI+教育行动计划权威解读"}
+  ]
+}
