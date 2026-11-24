@@ -3448,16 +3448,16 @@ function normAwardType(v) {
 
 // 获奖 Excel 导入主函数：自动识别「明细表」与「矩阵表」两种格式
 async function handleAwardImport(file) {
-  showLoading('正在解析获奖Excel...');
   try {
     const fileName = file.name || '';
-    // 导入时先选学年（获奖统计以学年归档）
+    // 导入时先选学年（获奖统计以学年归档）——先关遮罩，避免盖住弹窗
     const nowY = new Date().getFullYear();
     const yearOpts = [];
     for (let y = nowY + 1; y >= nowY - 6; y--) yearOpts.push(`${y}-${y + 1}`);
     const meta = await showAwardImportMeta(fileName, yearOpts);
-    if (!meta) { hideLoading(); return; }
+    if (!meta) return;
     const academicYear = meta.year;
+    showLoading('正在解析获奖Excel...');
 
     const students = await dbGetAll('students');
     const bySid = {}, byName = {};
