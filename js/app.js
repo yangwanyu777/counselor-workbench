@@ -857,12 +857,18 @@ MODULE_RENDERERS.dashboard = async function(container) {
   }
   const todayClasses = weekClasses.find(w => w.isToday);
 
-  // 重点资讯：每个分类取第一条
-  const categories = ['思政教育','学生管理','党建工作','就业指导','政策新规','能力提升'];
-  const keyNews = categories.map(cat => {
-    const source = NEWS_SOURCES.find(s => s.category === cat);
-    return source ? { ...source, category: cat } : null;
-  }).filter(Boolean);
+  // 重点资讯：从 news-feed.json 读取最新 5 条（失败则回退到官网入口）
+  let keyNews = [];
+  try {
+    const resp = await fetch('news-feed.json', { cache: 'default' });
+    if (resp.ok) {
+      const feed = await resp.json();
+      keyNews = (feed.items || []).slice().sort((a, b) => String(b.date || '').localeCompare(String(a.date || ''))).slice(0, 5);
+    }
+  } catch (e) { console.warn('[Dashboard] 资讯加载失败', e); }
+  if (keyNews.length === 0) {
+    keyNews = NEWS_SOURCES.slice(0, 5).map(s => ({ title: s.title, url: s.url, source: s.source, category: s.category, date: '' }));
+  }
 
   container.innerHTML = `
     <div class="reminder-banner" id="reminderBanner" style="display:none">
@@ -926,19 +932,19 @@ MODULE_RENDERERS.dashboard = async function(container) {
       <div class="card-header">
         <div>
           <div class="card-title">📰 重点资讯</div>
-          <div class="card-subtitle">教育部、省教育厅、学习强国等官方渠道精选</div>
+          <div class="card-subtitle">官方渠道每日精选 · 点击打开原文</div>
         </div>
         <button class="btn btn-outline btn-sm" onclick="navigateTo('news')">查看更多</button>
       </div>
       <div>
         ${keyNews.map(s => `
           <div class="news-item">
-            <span class="news-tag tag-blue">${s.category}</span>
+            <span class="news-tag tag-blue">${escapeHtml(s.category || s.source)}</span>
             <div class="news-content">
-              <a href="${s.url}" target="_blank" rel="noopener noreferrer" style="text-decoration:none">
-                <div class="news-title">${s.title}</div>
+              <a href="${escapeHtml(s.url)}" target="_blank" rel="noopener noreferrer" style="text-decoration:none">
+                <div class="news-title">${escapeHtml(s.title)}</div>
               </a>
-              <div class="news-meta">${s.source} · 点击跳转官网查看最新通知</div>
+              <div class="news-meta">${escapeHtml(s.source || '')}${s.date ? ' · ' + escapeHtml(s.date) : ''} · 点击打开原文</div>
             </div>
           </div>
         `).join('')}
@@ -1021,8 +1027,8 @@ function renderStudentList(container) {
           <button class="btn btn-outline" onclick="showFieldManager()">⚙️ 调整字段</button>
           <button class="btn btn-outline" onclick="exportStudentsList()">📤 导出全部</button>
           <button class="btn btn-outline" onclick="exportSelectedStudents()" id="exportSelectedBtn" style="display:none">📤 导出选中</button>
-          <button class="btn btn-outline" onclick="editSelectedStudent()" id="editSelectedBtn" style="display:none">✏️ 编辑选中</button>
-          <button class="btn btn-danger" onclick="deleteSelectedStudents()" id="deleteSelectedBtn" style="display:none">🗑️ 删除选中</button>
+          <button class="btn btn-outline" onclick="editSelectedStudent()" id="editSelectedBtn">✏️ 编辑</button>
+          <button class="btn btn-danger" onclick="deleteSelectedStudents()" id="deleteSelectedBtn">🗑️ 删除</button>
           <button class="btn btn-outline" onclick="fixStudentData()" title="合并重复学号/姓名的数据">🔧 修复重复</button>
         </div>
         <div>
@@ -2044,13 +2050,13 @@ function updateExportSelectedBtn() {
   }
   const editBtn = document.getElementById('editSelectedBtn');
   if (editBtn) {
-    editBtn.style.display = n > 0 ? '' : 'none';
-    editBtn.textContent = n > 1 ? `✏️ 编辑选中(请只勾1人)` : `✏️ 编辑选中`;
+    editBtn.textContent = n > 1 ? `✏️ 编辑(请只勾1人)` : (n === 1 ? `✏️ 编辑(1人)` : `✏️ 编辑`);
+    editBtn.title = n === 0 ? '请先勾选要编辑的学生' : '编辑勾选的学生';
   }
   const delBtn = document.getElementById('deleteSelectedBtn');
   if (delBtn) {
-    delBtn.style.display = n > 0 ? '' : 'none';
-    delBtn.textContent = `🗑️ 删除选中(${n})`;
+    delBtn.textContent = n > 0 ? `🗑️ 删除(${n})` : `🗑️ 删除`;
+    delBtn.title = n === 0 ? '请先勾选要删除的学生' : '删除勾选的学生';
   }
 }
 
@@ -4732,55 +4738,92 @@ const NEWS_SOURCES = [
   { category: '能力提升', title: '中国高等教育学会辅导员工作研究分会', url: 'https://www.gfdx.fudan.edu.cn/', source: '学工分会' }
 ];
 
-MODULE_RENDERERS.news = function(container) {
-  const categories = ['思政教育','学生管理','党建工作','就业指导','政策新规','能力提升'];
-  let html = `
+MODULE_RENDERERS.news = async function(container) {
+  const categories = NEWS_CATEGORIES;
+  container.innerHTML = `
     <div class="card">
       <div class="card-header">
         <div>
           <div class="card-title">辅导员资讯推送</div>
-          <div class="card-subtitle">仅收录教育部、省教育厅、学习强国等官方渠道资讯</div>
+          <div class="card-subtitle" id="newsUpdatedAt">官方渠道精选 · 每日自动更新</div>
         </div>
+        <button class="btn btn-outline btn-sm" onclick="loadNewsFeed(true)">🔄 刷新资讯</button>
       </div>
       <div class="tabs" id="newsTabs">
-        ${categories.map((cat, i) => `<button class="tab ${i===0?'active':''}" onclick="switchNewsTab('${cat}', this)">${cat}</button>`).join('')}
+        <button class="tab active" onclick="switchNewsTab('全部', this)">全部</button>
+        ${categories.map(cat => `<button class="tab" onclick="switchNewsTab('${cat}', this)">${cat}</button>`).join('')}
       </div>
-      <div id="newsContent"></div>
+      <div id="newsContent"><div class="empty-text" style="padding:24px">正在加载资讯…</div></div>
     </div>
     <div class="card">
       <div class="card-header">
-        <div class="card-title">资讯来源说明</div>
+        <div class="card-title">📌 常用官方入口（直达栏目页）</div>
       </div>
-      <p style="font-size:13px;color:var(--text-muted);line-height:1.8">
-        本模块仅收录官方正规渠道发布的资讯，包括：<br>
-        1. 中华人民共和国教育部 (moe.gov.cn)<br>
-        2. 陕西省教育厅 (jyt.shaanxi.gov.cn)<br>
-        3. 学习强国 (xuexi.cn)<br>
-        4. 全国高校思政网 (univs.cn)<br>
-        5. 共产党员网 (12371.cn)<br>
-        6. 国家大学生就业服务平台 (ncss.cn)<br>
-        <br>
-        点击下方各板块链接可直接跳转至官方来源页面查看最新资讯。
+      <div class="news-source-grid">
+        ${NEWS_SOURCES.map(s => `
+          <a href="${s.url}" target="_blank" rel="noopener noreferrer" class="news-source-link">
+            <span class="news-tag tag-blue">${escapeHtml(s.source)}</span>
+            <span>${escapeHtml(s.title)}</span>
+            <span style="color:var(--primary)">↗</span>
+          </a>
+        `).join('')}
+      </div>
+      <p style="font-size:12px;color:var(--text-muted);line-height:1.7;margin-top:12px">
+        说明：上方「资讯推送」由每日自动化任务从官方渠道抓取并筛选（学生工作、就业创业、奖助学金、政策安全、理论研究、AI赋能辅导员六个方向），点击标题直接打开原文。下方保留官方入口，方便直达栏目页查看更多。
       </p>
     </div>
   `;
-  container.innerHTML = html;
-  switchNewsTab('思政教育', document.querySelector('#newsTabs .tab'));
+  await loadNewsFeed(false);
 };
 
-function switchNewsTab(category, btn) {
-  document.querySelectorAll('#newsTabs .tab').forEach(t => t.classList.remove('active'));
-  btn.classList.add('active');
-  const sources = NEWS_SOURCES.filter(s => s.category === category);
+// 资讯分类（与 news-feed.json 保持一致）
+const NEWS_CATEGORIES = ['学生工作/思政教育', '就业创业', '奖助学金/资助', '政策新规/安全', '理论研究', 'AI赋能辅导员'];
+
+// 加载资讯数据（优先读缓存，可强制刷新）
+async function loadNewsFeed(force) {
   const content = document.getElementById('newsContent');
-  content.innerHTML = sources.map(s => `
+  if (!content) return;
+  try {
+    const cacheBust = force ? '?t=' + Date.now() : '';
+    const resp = await fetch('news-feed.json' + cacheBust, { cache: force ? 'no-store' : 'default' });
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    const data = await resp.json();
+    state.newsFeed = data;
+    const upd = document.getElementById('newsUpdatedAt');
+    if (upd) upd.textContent = `官方渠道精选 · 更新于 ${data.updatedAt || '—'} · 共 ${(data.items || []).length} 条`;
+    // 重新渲染当前激活分类
+    const activeBtn = document.querySelector('#newsTabs .tab.active');
+    switchNewsTab(activeBtn ? activeBtn.textContent : '全部', activeBtn, false);
+    if (force) showToast('资讯已刷新', 'success');
+  } catch (e) {
+    content.innerHTML = '<div class="empty-text" style="padding:24px">资讯加载失败，请点击「刷新资讯」重试</div>';
+    console.error('[News] 加载失败', e);
+  }
+}
+
+function switchNewsTab(category, btn, skipActive) {
+  if (!skipActive) {
+    document.querySelectorAll('#newsTabs .tab').forEach(t => t.classList.remove('active'));
+    if (btn) btn.classList.add('active');
+  }
+  const content = document.getElementById('newsContent');
+  if (!content) return;
+  const all = (state.newsFeed && state.newsFeed.items) || [];
+  const items = category === '全部' ? all : all.filter(x => x.category === category);
+  if (items.length === 0) {
+    content.innerHTML = '<div class="empty-text" style="padding:24px">该分类暂无资讯</div>';
+    return;
+  }
+  // 按日期倒序
+  const sorted = items.slice().sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
+  content.innerHTML = sorted.map(item => `
     <div class="news-item">
-      <span class="news-tag tag-blue">${s.source}</span>
+      <span class="news-tag tag-blue">${escapeHtml(item.source || item.category)}</span>
       <div class="news-content">
-        <a href="${s.url}" target="_blank" rel="noopener noreferrer" style="text-decoration:none">
-          <div class="news-title">${s.title}</div>
+        <a href="${escapeHtml(item.url)}" target="_blank" rel="noopener noreferrer" style="text-decoration:none">
+          <div class="news-title">${escapeHtml(item.title)}</div>
         </a>
-        <div class="news-meta">点击查看最新资讯 →</div>
+        <div class="news-meta">${escapeHtml(item.date || '')}${item.summary ? ' · ' + escapeHtml(item.summary) : ''} · 点击打开原文 →</div>
       </div>
     </div>
   `).join('');
