@@ -2471,6 +2471,18 @@ function renderGradeTrend() {
         <tbody id="gradeTrendBody"></tbody>
       </table>
     </div>
+    <!-- 学业 vs 综测 并列对比（与上方趋势共用同一学生，无需重复搜索） -->
+    <div style="margin-top:22px;padding-top:18px;border-top:2px solid var(--border-color)">
+      <div class="card-title">🔀 学业 vs 综测 排名并列对比</div>
+      <div class="card-subtitle" style="margin:4px 0 10px">与上方趋势图共用同一学生 · 学业排名（学期）与综测排名（对应学年）横向并列 · 位次差异 = 学业排名 − 综测排名（正数表示综测更靠前）</div>
+      <div class="chart-container"><canvas id="trendCompareChart"></canvas></div>
+      <div class="table-wrapper" style="margin-top:12px">
+        <table class="data-table">
+          <thead>${compareTableHead()}</thead>
+          <tbody id="trendCompareBody"></tbody>
+        </table>
+      </div>
+    </div>
   `;
   filterGradeTrendStudents();
 }
@@ -2499,6 +2511,10 @@ function filterGradeTrendStudents() {
     if (body) body.innerHTML = '<tr><td colspan="3">未找到匹配的学生</td></tr>';
     const ctx = document.getElementById('gradeTrendChart');
     if (ctx && state.charts.gradeTrend) { state.charts.gradeTrend.destroy(); state.charts.gradeTrend = null; }
+    const cbody = document.getElementById('trendCompareBody');
+    if (cbody) cbody.innerHTML = '<tr><td colspan="7">未找到匹配的学生</td></tr>';
+    const cctx = document.getElementById('trendCompareChart');
+    if (cctx && state.charts.trendCompare) { state.charts.trendCompare.destroy(); state.charts.trendCompare = null; }
   }
 }
 
@@ -2617,6 +2633,8 @@ function updateGradeTrend() {
       plugins: { title: { display: true, text: (st ? st.name + ' ' : '') + '学业成绩趋势' } }
     }
   });
+  // 联动刷新同页的「学业 vs 综测 并列对比」
+  renderGradeCompareInto('trendCompareBody', 'trendCompareChart', 'trendCompare', sid);
 }
 
 function renderGradeCompare() {
@@ -2631,10 +2649,13 @@ function renderGradeCompare() {
       <select class="select" id="compareStudent" onchange="updateGradeCompare()"></select>
       <button class="btn btn-outline" onclick="clearCompareSearch()">清除</button>
     </div>
+    <div style="font-size:12px;color:var(--text-muted);line-height:1.7;margin:-4px 0 12px;padding:10px 12px;background:rgba(30,78,140,.05);border-radius:8px">
+      📌 <strong>并列口径</strong>：以「学期」为单位横向并列——学业排名取该学期排名，综测排名取对应学年的学年排名（同一学年的两个学期共用该学年综测值）。排名优先用导入表中的值；无导入排名时，按<strong>同年级同专业</strong>内的分数计算。位次差异 = 学业排名 − 综测排名（正数表示综测名次更靠前）。
+    </div>
     <div class="chart-container"><canvas id="compareChart"></canvas></div>
     <div class="table-wrapper" style="margin-top:12px">
       <table class="data-table">
-        <thead><tr><th>学期/学年</th><th>学业加权总分</th><th>学业排名</th><th>综测总分</th><th>综测排名</th><th>位次差异(学业-综测)</th></tr></thead>
+        <thead>${compareTableHead()}</thead>
         <tbody id="compareBody"></tbody>
       </table>
     </div>
@@ -2642,59 +2663,151 @@ function renderGradeCompare() {
   filterCompareStudents();
 }
 
-function updateGradeCompare() {
-  const sid = document.getElementById('compareStudent').value;
+// 从学期标签提取学年：2024-2025-1 → 2024-2025
+function semesterToAcademicYear(semester) {
+  const m = String(semester || '').match(/^(\d{4}-\d{4})/);
+  return m ? m[1] : '';
+}
+
+// 计算某学生「学业 vs 综测」并列对比数据（纯逻辑，供趋势页与独立对比页复用）
+function computeGradeCompareRows(sid) {
   const studentMap = {};
   state.students.forEach(s => { studentMap[s.id] = s; });
   const st = studentMap[sid];
+  if (!st) return { st: null, rows: [] };
+
   const gradeRecs = state.grades.filter(g => String(g.studentId) === String(sid)).sort((a, b) => a.semester.localeCompare(b.semester));
   const assessRecs = state.assessments.filter(a => String(a.studentId) === String(sid)).sort((a, b) => a.academicYear.localeCompare(b.academicYear));
-
   const gMap = {}; gradeRecs.forEach(r => { gMap[r.semester] = r; });
   const aMap = {}; assessRecs.forEach(r => { aMap[r.academicYear] = r; });
 
-  const semGroups = {};
-  state.grades.forEach(g => { if (typeof g.weightedScore === 'number') { (semGroups[g.semester] = semGroups[g.semester] || []).push(g); } });
-  const gradeRankByKey = {};
-  Object.keys(semGroups).forEach(s => { const arr = semGroups[s].slice().sort((x, y) => (y.weightedScore || 0) - (x.weightedScore || 0)); arr.forEach((g, i) => { gradeRankByKey[String(g.studentId) + '_' + s] = i + 1; }); });
+  // 该学生的年级/专业，用于无导入排名时按「同年级同专业」计算
+  const stYear = String(st.year || '').trim();
+  const stMajor = String(st.major || '').trim();
+  const inSameScope = (s) => {
+    if (!s) return false;
+    if (stYear && String(s.year || '').trim() !== stYear) return false;
+    if (stMajor && String(s.major || '').trim() !== stMajor) return false;
+    return true;
+  };
 
-  const yearGroups = {};
-  state.assessments.forEach(a => { (yearGroups[a.academicYear] = yearGroups[a.academicYear] || []).push(a); });
-  const assessRankByKey = {};
-  Object.keys(yearGroups).forEach(y => { const arr = yearGroups[y].slice().sort((x, yy) => (yy.totalScore || 0) - (x.totalScore || 0)); arr.forEach((a, i) => { assessRankByKey[String(a.studentId) + '_' + y] = (a.overallRank != null ? a.overallRank : i + 1); }); });
-
-  const allLabels = [...new Set([...gradeRecs.map(r => r.semester), ...assessRecs.map(r => r.academicYear)])].sort();
-  const gData = allLabels.map(l => gMap[l] ? gMap[l].weightedScore : null);
-  const aData = allLabels.map(l => aMap[l] ? aMap[l].totalScore : null);
-  const gRankData = allLabels.map(l => gMap[l] ? (gMap[l].overallRank != null ? gMap[l].overallRank : gradeRankByKey[String(sid) + '_' + l]) : null);
-  const aRankData = allLabels.map(l => aMap[l] ? (assessRankByKey[String(sid) + '_' + l] || null) : null);
-
-  const body = document.getElementById('compareBody');
-  if (body) {
-    body.innerHTML = allLabels.map((l, i) => {
-      const g = gMap[l], a = aMap[l];
-      const gr = gRankData[i], ar = aRankData[i];
-      let diff = '-';
-      if (gr != null && ar != null) diff = gr - ar;
-      return `<tr><td>${l}</td><td>${g ? g.weightedScore.toFixed(2) : '-'}</td><td>${gr != null ? gr : '-'}</td><td>${a ? a.totalScore.toFixed(2) : '-'}</td><td>${ar != null ? ar : '-'}</td><td>${diff}</td></tr>`;
-    }).join('') || '<tr><td colspan="6">暂无数据</td></tr>';
+  // 学业排名：优先导入值；无则同学期、同年级同专业内按分数排名
+  const gradeRankCache = {};
+  function getGradeRank(sem) {
+    const g = gMap[sem];
+    if (!g) return null;
+    if (g.overallRank != null) return g.overallRank;
+    if (gradeRankCache[sem] != null) return gradeRankCache[sem];
+    const peers = state.grades.filter(x => x.semester === sem && typeof x.weightedScore === 'number' && inSameScope(studentMap[x.studentId]))
+      .sort((x, y) => (y.weightedScore || 0) - (x.weightedScore || 0));
+    const idx = peers.findIndex(x => String(x.studentId) === String(sid));
+    const r = idx >= 0 ? idx + 1 : null;
+    gradeRankCache[sem] = r;
+    return r;
   }
-  const ctx = document.getElementById('compareChart');
+  // 综测排名：优先导入值；无则同学年、同年级同专业内按分数排名
+  const assessRankCache = {};
+  function getAssessRank(ay) {
+    const a = aMap[ay];
+    if (!a) return null;
+    if (a.overallRank != null) return a.overallRank;
+    if (assessRankCache[ay] != null) return assessRankCache[ay];
+    const peers = state.assessments.filter(x => x.academicYear === ay && inSameScope(studentMap[x.studentId]))
+      .sort((x, y) => (y.totalScore || 0) - (x.totalScore || 0));
+    const idx = peers.findIndex(x => String(x.studentId) === String(sid));
+    const r = idx >= 0 ? idx + 1 : null;
+    assessRankCache[ay] = r;
+    return r;
+  }
+
+  // 以「学期」为主线构建并列行：学业(该学期) + 综测(该学期所属学年)
+  const rows = gradeRecs.map(g => {
+    const ay = semesterToAcademicYear(g.semester);
+    const a = aMap[ay] || null;
+    return {
+      semester: g.semester,
+      academicYear: ay || a?.academicYear || '-',
+      gScore: typeof g.weightedScore === 'number' ? g.weightedScore : null,
+      gRank: getGradeRank(g.semester),
+      aScore: a && typeof a.totalScore === 'number' ? a.totalScore : null,
+      aRank: a ? getAssessRank(ay) : null
+    };
+  });
+  // 补充：只有综测、没有对应学期学业记录的行（学年单独成行，学期列标注学年）
+  assessRecs.forEach(a => {
+    const covered = rows.some(r => r.academicYear === a.academicYear && r.aRank != null);
+    if (!covered) {
+      rows.push({
+        semester: a.academicYear + '（学年）',
+        academicYear: a.academicYear,
+        gScore: null, gRank: null,
+        aScore: typeof a.totalScore === 'number' ? a.totalScore : null,
+        aRank: getAssessRank(a.academicYear)
+      });
+    }
+  });
+  rows.sort((a, b) => a.semester.localeCompare(b.semester));
+  return { st, rows };
+}
+
+// 渲染对比表格 + 图表到指定容器（bodyId/canvasId/chartKey 支持趋势页与独立对比页复用）
+function renderGradeCompareInto(bodyId, canvasId, chartKey, sid) {
+  const { st, rows } = computeGradeCompareRows(sid);
+  const body = document.getElementById(bodyId);
+  const ctx = document.getElementById(canvasId);
+  if (!st) {
+    if (body) body.innerHTML = '<tr><td colspan="7">请选择学生</td></tr>';
+    if (ctx && state.charts[chartKey]) { state.charts[chartKey].destroy(); state.charts[chartKey] = null; }
+    return;
+  }
+  if (body) {
+    body.innerHTML = rows.map(r => {
+      let diff = '-';
+      if (r.gRank != null && r.aRank != null) {
+        const d = r.gRank - r.aRank;
+        diff = d > 0 ? `<span style="color:#C53030;font-weight:700">+${d}</span>` : (d < 0 ? `<span style="color:#2F855A;font-weight:700">${d}</span>` : '0');
+      }
+      return `<tr>
+        <td>${r.semester}</td>
+        <td>${r.academicYear}</td>
+        <td>${r.gScore != null ? r.gScore.toFixed(2) : '-'}</td>
+        <td>${r.gRank != null ? `<span class="tag ${r.gRank <= 3 ? 'tag-red' : 'tag-blue'}">${r.gRank}</span>` : '-'}</td>
+        <td>${r.aScore != null ? r.aScore.toFixed(2) : '-'}</td>
+        <td>${r.aRank != null ? `<span class="tag ${r.aRank <= 3 ? 'tag-red' : 'tag-blue'}">${r.aRank}</span>` : '-'}</td>
+        <td>${diff}</td>
+      </tr>`;
+    }).join('') || '<tr><td colspan="7">暂无数据</td></tr>';
+  }
+
+  const labels = rows.map(r => r.semester);
+  const gRankData = rows.map(r => r.gRank);
+  const aRankData = rows.map(r => r.aRank);
   if (ctx) {
-    if (state.charts.compare) state.charts.compare.destroy();
-    state.charts.compare = new Chart(ctx.getContext('2d'), {
+    if (state.charts[chartKey]) state.charts[chartKey].destroy();
+    state.charts[chartKey] = new Chart(ctx.getContext('2d'), {
       type: 'line',
-      data: { labels: allLabels, datasets: [
-        { label: '学业排名', data: gRankData, borderColor: '#1E4E8C', tension: 0.3, yAxisID: 'y' },
-        { label: '综测排名', data: aRankData, borderColor: '#E53E3E', tension: 0.3, yAxisID: 'y' }
+      data: { labels, datasets: [
+        { label: '学业排名', data: gRankData, borderColor: '#1E4E8C', backgroundColor: '#1E4E8C', tension: 0.25, spanGaps: false, pointRadius: 4 },
+        { label: '综测排名', data: aRankData, borderColor: '#E53E3E', backgroundColor: '#E53E3E', tension: 0.25, spanGaps: false, pointRadius: 4, borderDash: [5, 4] }
       ]},
       options: {
         responsive: true, maintainAspectRatio: false,
-        scales: { y: { reverse: true, title: { display: true, text: '排名（越小越好）' } } },
-        plugins: { title: { display: true, text: (st ? st.name + ' ' : '') + '学业 vs 综测 排名对比' } }
+        scales: { y: { reverse: true, title: { display: true, text: '排名（越靠上越好）' }, ticks: { precision: 0 } } },
+        plugins: { title: { display: true, text: (st ? st.name + ' ' : '') + '学业 vs 综测 排名并列对比' } }
       }
     });
   }
+}
+
+// 独立对比页调用
+function updateGradeCompare() {
+  const sid = document.getElementById('compareStudent').value;
+  renderGradeCompareInto('compareBody', 'compareChart', 'compare', sid);
+}
+
+// 趋势页并列对比区块的表头（供两处复用）
+function compareTableHead() {
+  return '<tr><th>学期</th><th>学年</th><th>学业总分</th><th>学业排名</th><th>综测总分</th><th>综测排名</th><th>位次差异</th></tr>';
 }
 
 // 学业vs综测对比：根据搜索关键词过滤学生下拉列表（复用 renderTrendStudentOptions）
@@ -2904,6 +3017,18 @@ function renderAssessRanking() {
   const container = document.getElementById('assessTabContent');
   const years = [...new Set(state.assessments.map(a => a.academicYear).filter(Boolean))].sort().reverse();
   const majors = [...new Set(state.assessments.map(a => a.major).filter(Boolean))].sort();
+  // 年级：优先综测记录 grade，回退学生库 year（如 2025级）
+  const studentMap = {};
+  state.students.forEach(s => { studentMap[s.id] = s; });
+  const grades = [...new Set(state.assessments.map(a => {
+    const st = studentMap[a.studentId];
+    return String(a.grade || (st && st.year) || '').trim();
+  }).filter(Boolean))].sort().reverse();
+  // 学历层次：标准三档打底 + 学生库中出现的其他值，确保筛选始终可用
+  const gradeLevels = [...new Set([
+    '本科', '硕士研究生', '博士研究生',
+    ...state.students.map(s => String(s.gradeLevel || '').trim())
+  ].filter(Boolean))];
   if (years.length === 0) {
     container.innerHTML = '<div class="empty-state"><div class="empty-icon">📋</div><div class="empty-text">暂无综测数据，请点击「导入综测Excel」</div></div>';
     return;
@@ -2913,14 +3038,18 @@ function renderAssessRanking() {
       <select class="select" id="assessYear" onchange="updateAssessRanking()">
         ${years.map(y => `<option value="${y}">${y}</option>`).join('')}
       </select>
+      <select class="select" id="assessGradeLevelFilter" onchange="updateAssessRanking()">
+        <option value="">全部学历层次</option>
+        ${gradeLevels.map(g => `<option value="${g}">${g}</option>`).join('')}
+      </select>
+      <select class="select" id="assessGradeFilter" onchange="updateAssessRanking()">
+        <option value="">全部年级</option>
+        ${grades.map(g => `<option value="${g}">${g}</option>`).join('')}
+      </select>
       ${majors.length > 0 ? `<select class="select" id="assessMajorFilter" onchange="updateAssessRanking()">
         <option value="">全部专业</option>
         ${majors.map(m => `<option value="${m}">${m}</option>`).join('')}
       </select>` : ''}
-      <select class="select" id="assessClass" onchange="updateAssessRanking()">
-        <option value="">全部班级</option>
-        ${[...new Set(state.students.map(s => s.className).filter(Boolean))].sort().map(c => `<option value="${c}">${c}</option>`).join('')}
-      </select>
     </div>
     <div class="table-wrapper">
       <table class="data-table">
@@ -2934,15 +3063,18 @@ function renderAssessRanking() {
 
 function updateAssessRanking() {
   const year = document.getElementById('assessYear').value;
+  const gradeLevelFilter = document.getElementById('assessGradeLevelFilter')?.value || '';
+  const gradeFilter = document.getElementById('assessGradeFilter')?.value || '';
   const majorFilter = document.getElementById('assessMajorFilter')?.value || '';
-  const classFilter = document.getElementById('assessClass')?.value || '';
   const studentMap = {};
   state.students.forEach(s => { studentMap[s.id] = s; });
   let rows = state.assessments.filter(a => a.academicYear === year).map(a => {
     const st = studentMap[a.studentId];
     if (!st) return null;
     if (majorFilter && (a.major || '') !== majorFilter) return null;
-    if (classFilter && st.className !== classFilter) return null;
+    const grade = String(a.grade || st.year || '').trim();
+    if (gradeFilter && grade !== gradeFilter) return null;
+    if (gradeLevelFilter && String(st.gradeLevel || '').trim() !== gradeLevelFilter) return null;
     // 排名优先用导入值，无则按总分临时算
     return { st, score: a.totalScore, rank: a.overallRank };
   }).filter(Boolean);
