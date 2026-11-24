@@ -4170,21 +4170,27 @@ async function deleteAward(id) {
 // ---------- 生涯规划 ----------
 const CAREER_GOALS = ['考研', '考公', '就业求职', '出国留学', '暂未规划'];
 const CAREER_GOAL_COLORS = ['#1E4E8C', '#38A169', '#D69E2E', '#E53E3E', '#718096'];
-const CAREER_LEVELS = ['本科', '硕士研究生', '博士研究生'];
+const CAREER_LEVELS = ['本科', '硕士', '博士'];
+
+// 将学生库中的学历层次归一到 本科/硕士/博士 三档（兼容"硕士研究生/博士研究生/硕士/博士"等写法）
+function normalizeCareerLevel(val) {
+  const v = String(val || '').trim();
+  if (v.includes('博士')) return '博士';
+  if (v.includes('硕士')) return '硕士';
+  if (v.includes('本科')) return '本科';
+  return '';
+}
 
 MODULE_RENDERERS.career = async function(container) {
   state.students = await dbGetAll('students');
-  if (!state.careerLevel) state.careerLevel = ''; // 空=全部
-  const levels = [...new Set([
-    ...CAREER_LEVELS,
-    ...state.students.map(s => String(s.gradeLevel || '').trim()).filter(Boolean)
-  ])];
+  if (!CAREER_LEVELS.includes(state.careerLevel)) state.careerLevel = ''; // 空=全部（残留的旧值自动重置）
+  const levels = CAREER_LEVELS;
   container.innerHTML = `
     <div class="card">
       <div class="card-header">
         <div>
           <div class="card-title">🎯 生涯规划大数据</div>
-          <div class="card-subtitle">按学历层次分开统计 · 本科 / 硕士研究生 / 博士研究生</div>
+          <div class="card-subtitle">按学历层次分开统计 · 本科 / 硕士 / 博士</div>
         </div>
       </div>
       <div class="tabs" id="careerLevelTabs">
@@ -4214,7 +4220,7 @@ function renderCareerByLevel() {
     if (state.charts[k]) { state.charts[k].destroy(); state.charts[k] = null; }
   });
   const level = state.careerLevel || '';
-  const scoped = level ? state.students.filter(s => String(s.gradeLevel || '').trim() === level) : state.students;
+  const scoped = level ? state.students.filter(s => normalizeCareerLevel(s.gradeLevel) === level) : state.students;
   const goals = {}; CAREER_GOALS.forEach(g => goals[g] = 0);
   const classGoals = {};
   scoped.forEach(s => {
@@ -4342,12 +4348,8 @@ function renderCareerByLevel() {
 
 // 计算各学历层次的生涯目标统计
 function careerLevelStats() {
-  const levels = [...new Set([
-    ...CAREER_LEVELS,
-    ...state.students.map(s => String(s.gradeLevel || '').trim()).filter(Boolean)
-  ])];
-  return levels.map(level => {
-    const list = state.students.filter(s => String(s.gradeLevel || '').trim() === level);
+  return CAREER_LEVELS.map(level => {
+    const list = state.students.filter(s => normalizeCareerLevel(s.gradeLevel) === level);
     const goals = {}; CAREER_GOALS.forEach(g => goals[g] = 0);
     list.forEach(s => {
       const goal = CAREER_GOALS.includes(s.careerGoal) ? s.careerGoal : '暂未规划';
