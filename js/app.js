@@ -673,6 +673,11 @@ function closeModal() {
     _pendingPromptResolve = null;
     resolve(null);
   }
+  if (typeof _pendingAssessResolve !== 'undefined' && _pendingAssessResolve) {
+    const resolve = _pendingAssessResolve;
+    _pendingAssessResolve = null;
+    resolve(null);
+  }
 }
 
 // 自定义输入弹窗（替代被浏览器拦截的 prompt）
@@ -696,6 +701,51 @@ function confirmPromptModal() {
 }
 function cancelPromptModal() {
   if (_pendingPromptResolve) { const r = _pendingPromptResolve; _pendingPromptResolve = null; r(null); }
+  closeModal();
+}
+
+// 综测导入：选择「专业 + 学年」弹窗（专业可下拉可选可手输，学年可手输）
+let _pendingAssessResolve = null;
+let _assessImportMeta = null;
+function showAssessmentImportMeta(students, defaultMajor) {
+  return new Promise((resolve) => {
+    _pendingAssessResolve = resolve;
+    // 专业候选：从学生库已有专业去重
+    const majors = [...new Set((students || []).map(s => String(s.major || '').trim()).filter(Boolean))].sort();
+    if (defaultMajor && !majors.includes(defaultMajor)) majors.unshift(defaultMajor);
+    // 学年候选：从学生年级 + 最近年份推断
+    const nowY = new Date().getFullYear();
+    const yearOpts = [];
+    for (let y = nowY + 1; y >= nowY - 6; y--) yearOpts.push(`${y}-${y + 1}`);
+    showModal('综测导入设置', `
+      <div style="font-size:13px;color:var(--text-muted);margin-bottom:16px">请确认本次表格对应的<strong>专业</strong>与<strong>学年</strong>，导入后系统按此归档。</div>
+      <div class="input-group" style="margin-bottom:16px">
+        <label class="input-label">所属专业 <span style="color:var(--text-muted);font-weight:400">（可下拉选择，也可直接输入）</span></label>
+        <input type="text" class="input" id="f_assessMajor" list="assessMajorOpts" value="${defaultMajor || ''}" placeholder="如：行政管理" style="width:100%" onkeydown="if(event.key==='Enter'){document.getElementById('f_assessYear').focus()}">
+        <datalist id="assessMajorOpts">
+          ${majors.map(m => `<option value="${m}"></option>`).join('')}
+        </datalist>
+      </div>
+      <div class="input-group">
+        <label class="input-label">学年</label>
+        <input type="text" class="input" id="f_assessYear" list="assessYearOpts" value="${yearOpts[1] || ''}" placeholder="如：2025-2026" style="width:100%" onkeydown="if(event.key==='Enter'){confirmAssessImportMeta()}">
+        <datalist id="assessYearOpts">
+          ${yearOpts.map(y => `<option value="${y}"></option>`).join('')}
+        </datalist>
+      </div>
+    `, `<button class="btn btn-outline" onclick="cancelAssessImportMeta()">取消</button><button class="btn btn-primary" onclick="confirmAssessImportMeta()">确定并导入</button>`);
+    setTimeout(() => { const el = document.getElementById('f_assessMajor'); if (el) { el.focus(); } }, 100);
+  });
+}
+function confirmAssessImportMeta() {
+  const major = document.getElementById('f_assessMajor')?.value.trim() || '';
+  const year = document.getElementById('f_assessYear')?.value.trim() || '';
+  if (!year) { showToast('请填写学年', 'error'); return; }
+  if (_pendingAssessResolve) { const r = _pendingAssessResolve; _pendingAssessResolve = null; r({ major, year }); }
+  closeModal();
+}
+function cancelAssessImportMeta() {
+  if (_pendingAssessResolve) { const r = _pendingAssessResolve; _pendingAssessResolve = null; r(null); }
   closeModal();
 }
 
@@ -1676,15 +1726,15 @@ async function showStudentDetail(id) {
   const allAssess = await dbGetAll('assessments');
   const assessments = allAssess.filter(a => String(a.studentId) === String(id));
 
-  // 综测每学年排名
+  // 综测每学年排名：优先用导入的排名，无则按总分临时算
   const yearGroups = {};
   allAssess.forEach(a => { (yearGroups[a.academicYear] = yearGroups[a.academicYear] || []).push(a); });
   const assessRankMap = {};
   Object.keys(yearGroups).forEach(y => {
     const arr = yearGroups[y].slice().sort((x, yy) => (yy.totalScore || 0) - (x.totalScore || 0));
-    arr.forEach((a, i) => { assessRankMap[String(a.studentId) + '_' + y] = i + 1; });
+    arr.forEach((a, i) => { assessRankMap[String(a.studentId) + '_' + y] = (a.overallRank != null ? a.overallRank : i + 1); });
   });
-  const assessmentRanks = assessments.map(a => ({ year: a.academicYear, score: a.totalScore, rank: assessRankMap[String(id) + '_' + a.academicYear] })).sort((a, b) => b.year.localeCompare(a.year));
+  const assessmentRanks = assessments.map(a => ({ year: a.academicYear, major: a.major || '', score: a.totalScore, rank: a.overallRank != null ? a.overallRank : assessRankMap[String(id) + '_' + a.academicYear] })).sort((a, b) => b.year.localeCompare(a.year));
 
   // 学业排名（已存 overallRank）
   const academicRanks = grades.map(g => ({ semester: g.semester, score: g.weightedScore, rank: g.overallRank })).sort((a, b) => a.semester.localeCompare(b.semester));
@@ -2573,7 +2623,7 @@ function updateGradeCompare() {
   const yearGroups = {};
   state.assessments.forEach(a => { (yearGroups[a.academicYear] = yearGroups[a.academicYear] || []).push(a); });
   const assessRankByKey = {};
-  Object.keys(yearGroups).forEach(y => { const arr = yearGroups[y].slice().sort((x, yy) => (yy.totalScore || 0) - (x.totalScore || 0)); arr.forEach((a, i) => { assessRankByKey[String(a.studentId) + '_' + y] = i + 1; }); });
+  Object.keys(yearGroups).forEach(y => { const arr = yearGroups[y].slice().sort((x, yy) => (yy.totalScore || 0) - (x.totalScore || 0)); arr.forEach((a, i) => { assessRankByKey[String(a.studentId) + '_' + y] = (a.overallRank != null ? a.overallRank : i + 1); }); });
 
   const allLabels = [...new Set([...gradeRecs.map(r => r.semester), ...assessRecs.map(r => r.academicYear)])].sort();
   const gData = allLabels.map(l => gMap[l] ? gMap[l].weightedScore : null);
@@ -2807,7 +2857,8 @@ function switchAssessTab(tab, btn) {
 
 function renderAssessRanking() {
   const container = document.getElementById('assessTabContent');
-  const years = [...new Set(state.assessments.map(a => a.academicYear))].sort().reverse();
+  const years = [...new Set(state.assessments.map(a => a.academicYear).filter(Boolean))].sort().reverse();
+  const majors = [...new Set(state.assessments.map(a => a.major).filter(Boolean))].sort();
   if (years.length === 0) {
     container.innerHTML = '<div class="empty-state"><div class="empty-icon">📋</div><div class="empty-text">暂无综测数据，请点击「导入综测Excel」</div></div>';
     return;
@@ -2817,6 +2868,10 @@ function renderAssessRanking() {
       <select class="select" id="assessYear" onchange="updateAssessRanking()">
         ${years.map(y => `<option value="${y}">${y}</option>`).join('')}
       </select>
+      ${majors.length > 0 ? `<select class="select" id="assessMajorFilter" onchange="updateAssessRanking()">
+        <option value="">全部专业</option>
+        ${majors.map(m => `<option value="${m}">${m}</option>`).join('')}
+      </select>` : ''}
       <select class="select" id="assessClass" onchange="updateAssessRanking()">
         <option value="">全部班级</option>
         ${[...new Set(state.students.map(s => s.className).filter(Boolean))].sort().map(c => `<option value="${c}">${c}</option>`).join('')}
@@ -2834,24 +2889,34 @@ function renderAssessRanking() {
 
 function updateAssessRanking() {
   const year = document.getElementById('assessYear').value;
+  const majorFilter = document.getElementById('assessMajorFilter')?.value || '';
   const classFilter = document.getElementById('assessClass')?.value || '';
   const studentMap = {};
   state.students.forEach(s => { studentMap[s.id] = s; });
   let rows = state.assessments.filter(a => a.academicYear === year).map(a => {
     const st = studentMap[a.studentId];
     if (!st) return null;
+    if (majorFilter && (a.major || '') !== majorFilter) return null;
     if (classFilter && st.className !== classFilter) return null;
-    return { st, score: a.totalScore };
-  }).filter(Boolean).sort((a, b) => (b.score || 0) - (a.score || 0));
-  document.getElementById('assessRankBody').innerHTML = rows.map((r, i) => `
-    <tr class="row-clickable" onclick="showStudentDetail(${r.st.id})">
-      <td><span class="tag ${i < 3 ? 'tag-red' : 'tag-blue'}">${i + 1}</span></td>
+    // 排名优先用导入值，无则按总分临时算
+    return { st, score: a.totalScore, rank: a.overallRank };
+  }).filter(Boolean);
+  // 有导入排名时按排名升序；否则按总分降序
+  const hasRank = rows.some(r => r.rank != null);
+  rows.sort((a, b) => {
+    if (hasRank) return ((a.rank != null ? a.rank : 9999) - (b.rank != null ? b.rank : 9999)) || ((b.score || 0) - (a.score || 0));
+    return (b.score || 0) - (a.score || 0);
+  });
+  document.getElementById('assessRankBody').innerHTML = rows.map((r, i) => {
+    const rankVal = r.rank != null ? r.rank : (i + 1);
+    return `<tr class="row-clickable" onclick="showStudentDetail(${r.st.id})">
+      <td><span class="tag ${rankVal <= 3 ? 'tag-red' : 'tag-blue'}">${rankVal}</span></td>
       <td>${r.st.studentId}</td>
       <td>${r.st.name}</td>
       <td>${r.st.className || '-'}</td>
       <td style="font-weight:700">${r.score != null ? r.score.toFixed(2) : '-'}</td>
-    </tr>
-  `).join('') || '<tr><td colspan="5"><div class="empty-state"><div class="empty-text">暂无数据</div></div></td></tr>';
+    </tr>`;
+  }).join('') || '<tr><td colspan="5"><div class="empty-state"><div class="empty-text">暂无数据</div></div></td></tr>';
 }
 
 function renderAssessTrend() {
@@ -2886,7 +2951,7 @@ function updateAssessTrend() {
   const yearGroups = {};
   state.assessments.forEach(a => { (yearGroups[a.academicYear] = yearGroups[a.academicYear] || []).push(a); });
   const rankMap = {};
-  Object.keys(yearGroups).forEach(y => { const arr = yearGroups[y].slice().sort((x, yy) => (yy.totalScore || 0) - (x.totalScore || 0)); arr.forEach((a, i) => { rankMap[String(a.studentId) + '_' + y] = i + 1; }); });
+  Object.keys(yearGroups).forEach(y => { const arr = yearGroups[y].slice().sort((x, yy) => (yy.totalScore || 0) - (x.totalScore || 0)); arr.forEach((a, i) => { rankMap[String(a.studentId) + '_' + y] = (a.overallRank != null ? a.overallRank : i + 1); }); });
   const labels = recs.map(r => r.academicYear);
   const scores = recs.map(r => r.totalScore);
   const ranks = recs.map(r => rankMap[String(sid) + '_' + r.academicYear]);
@@ -2924,48 +2989,116 @@ async function handleAssessmentImport(file) {
   showLoading('正在解析综测Excel...');
   try {
     const data = await readExcelFile(file);
-    if (!data || data.length === 0) { hideLoading(); showToast('文件为空', 'error'); return; }
+    if (!data || data.length === 0) { hideLoading(); showToast('文件为空或表头识别失败', 'error'); return; }
 
-    const year = await showPromptModal('综测导入', '请输入本表学年', '如：2025-2026', '');
-    if (!year) { hideLoading(); return; }
-
-    const students = await dbGetAll('students');
-    let count = 0, unmatched = 0;
-
-    for (const row of data) {
-      const sid = String(row['学号'] || row['学 号'] || Object.values(row)[0] || '').trim();
-      if (!sid) continue;
-      const student = students.find(s => s.studentId === sid);
-      if (!student) { unmatched++; continue; }
-
-      const totalScore = parseFloat(row['总分'] || row['综测总分'] || row['综合素质测评总分'] || row['总成绩'] || '0');
-      const items = [];
-
-      // 尝试解析各项分数
-      const itemKeys = Object.keys(row).filter(k => !k.includes('学号') && !k.includes('姓名') && !k.includes('总分') && !k.includes('班级') && !k.includes('专业') && !k.includes('年级'));
-      itemKeys.forEach(k => {
-        const val = parseFloat(row[k]);
-        if (!isNaN(val) && val > 0) items.push({ name: k, score: val });
-      });
-
-      const existing = await dbGetByIndex('assessments', 'studentId', String(student.id));
-      const existYear = existing.find(a => a.academicYear === year);
-      const assessData = { academicYear: year, studentId: String(student.id), totalScore: totalScore || (items.length > 0 ? items.reduce((s,i)=>s+i.score,0) : 0), items };
-
-      if (existYear) {
-        await dbPut('assessments', { ...existYear, ...assessData, id: existYear.id });
-      } else {
-        await dbAdd('assessments', assessData);
+    const keys = Object.keys(data[0] || {});
+    // 用清理后的列名做候选匹配（兼容空格/不可见字符/别名）
+    const colOf = (candidates) => {
+      for (const c of candidates) {
+        const hit = keys.find(k => cleanColumnName(k) === cleanColumnName(c));
+        if (hit) return hit;
+        const fuzzy = keys.find(k => cleanColumnName(k).includes(cleanColumnName(c)));
+        if (fuzzy) return fuzzy;
       }
-      count++;
+      return null;
+    };
+    const sidCol = colOf(['学号', '考号', '考生号', '学籍号']);
+    const nameCol = colOf(['姓名', '学生姓名', '名字']);
+    const rankCol = colOf(['排名', '名次', '位次', '总排名']);
+    const scoreCol = colOf(['综测总分', '综合素质测评总分', '综合测评总分', '总分', '总成绩']) || keys.find(k => cleanColumnName(k).includes('总分'));
+
+    if (!scoreCol) {
+      hideLoading();
+      showToast(`未能识别综测总分列。识别到的表头：${keys.slice(0, 12).join('、') || '（空）'}`, 'error');
+      return;
+    }
+    if (!sidCol && !nameCol) {
+      hideLoading();
+      showToast(`未能识别学号或姓名列。识别到的表头：${keys.slice(0, 12).join('、') || '（空）'}`, 'error');
+      return;
     }
 
+    // 先读学生，供弹窗列出专业候选
+    const students = await dbGetAll('students');
+    // 从文件名猜测默认专业（如“25级行管综测”→ 含“行管”的已有专业）
+    const fileName = file.name || '';
+    let guessedMajor = '';
+    const allMajors = [...new Set(students.map(s => String(s.major || '').trim()).filter(Boolean))];
+    const hintMap = { '行管': ['行政管理', '行管'], '社保': ['社会保障'], '应急': ['应急管理'], '公管': ['公共管理'] };
+    for (const [hint, names] of Object.entries(hintMap)) {
+      if (fileName.includes(hint)) { const m = names.find(n => allMajors.some(am => am.includes(n))); if (m) { guessedMajor = allMajors.find(am => am.includes(m)) || m; break; } }
+    }
     hideLoading();
-    showToast(`导入完成：${count} 人综测数据已更新${unmatched > 0 ? `，${unmatched} 人未匹配` : ''}`, 'success');
+    const meta = await showAssessmentImportMeta(students, guessedMajor);
+    if (!meta) return;
+    const major = meta.major || '';
+    const year = meta.year;
+    showLoading('正在解析综测Excel...');
+
+    // 学号/姓名双索引（学号标准化）
+    const bySid = {}, byName = {};
+    students.forEach(s => {
+      const sid = normalizeStudentId(s.studentId);
+      if (sid) bySid[sid] = s;
+      const nm = String(s.name || '').trim();
+      if (nm) byName[nm] = s;
+    });
+    // 已存在记录索引：学生 + 学年 + 专业
+    const existing = await dbGetAll('assessments');
+    const existByKey = {};
+    existing.forEach(a => {
+      if (a && a.studentId) existByKey[String(a.studentId) + '__' + (a.academicYear || '') + '__' + (a.major || '')] = a;
+    });
+
+    const toAdd = [], toUpdate = [];
+    let unmatched = 0, invalid = 0;
+    const unmatchedSamples = [];
+    for (const row of data) {
+      const sid = sidCol ? normalizeStudentId(row[sidCol]) : '';
+      const nm = nameCol ? String(row[nameCol] || '').trim() : '';
+      const student = (sid && bySid[sid]) || (nm && byName[nm]) || null;
+      if (!student) {
+        unmatched++;
+        if (unmatchedSamples.length < 5) unmatchedSamples.push(sid || nm || '未知');
+        continue;
+      }
+      const totalScore = parseFloat(String(row[scoreCol] ?? '').replace(/[^\d.-]/g, ''));
+      const rank = rankCol ? parseInt(String(row[rankCol] ?? '').replace(/[^\d]/g, ''), 10) : null;
+      if (isNaN(totalScore) && (rank == null || isNaN(rank))) { invalid++; continue; }
+
+      const key = String(student.id) + '__' + year + '__' + major;
+      const rec = {
+        studentId: String(student.id),
+        academicYear: year,
+        major,
+        totalScore: isNaN(totalScore) ? null : totalScore,
+        overallRank: (rank != null && !isNaN(rank)) ? rank : null,
+        className: student.className || '',
+        updatedAt: Date.now()
+      };
+      if (existByKey[key]) { rec.id = existByKey[key].id; rec.createdAt = existByKey[key].createdAt || Date.now(); toUpdate.push(rec); }
+      else { rec.createdAt = Date.now(); toAdd.push(rec); }
+    }
+
+    // 批量写入（单事务）
+    for (const rec of toUpdate) await dbPut('assessments', rec);
+    if (toAdd.length) await dbAddBatch('assessments', toAdd);
+
+    hideLoading();
+    const headInfo = `学号=${sidCol || '无'}, 姓名=${nameCol || '无'}, 排名=${rankCol || '无'}, 综测总分=${scoreCol || '无'}`;
+    console.log('[综测导入]', headInfo, '专业=' + major, '学年=' + year, '行数=' + data.length, '未匹配样例=', unmatchedSamples);
+    let msg = `导入完成（${year}${major ? ' · ' + major : ''}）：新增 ${toAdd.length} 条，更新 ${toUpdate.length} 条`;
+    if (unmatched > 0) {
+      msg += `，${unmatched} 人未匹配（${unmatchedSamples.join('、')}等）`;
+      if (unmatched === data.length) msg += '。请先在「学生管理」导入学生名单，再导入综测排名。';
+    }
+    if (invalid > 0) msg += `，${invalid} 行因分数/排名为空跳过`;
+    showToast(msg, unmatched === data.length ? 'error' : (unmatched > 0 ? 'warning' : 'success'));
     state.assessments = await dbGetAll('assessments');
     navigateTo('assessment');
   } catch (err) {
     hideLoading();
+    console.error(err);
     showToast('导入失败：' + err.message, 'error');
   }
 }
@@ -2980,19 +3113,28 @@ async function exportAssessmentRanking() {
 
   for (const year of years) {
     const yearAssess = state.assessments.filter(a => a.academicYear === year);
-    let ranked = yearAssess.map(a => {
-      const student = studentMap[a.studentId];
-      if (!student) return null;
-      return { student, score: a.totalScore };
-    }).filter(Boolean).sort((a,b) => (b.score||0)-(a.score||0));
+    const majorsInYear = [...new Set(yearAssess.map(a => a.major).filter(Boolean))];
+    for (const major of (majorsInYear.length ? majorsInYear : [''])) {
+      const group = yearAssess.filter(a => (a.major || '') === major);
+      let ranked = group.map(a => {
+        const student = studentMap[a.studentId];
+        if (!student) return null;
+        return { student, score: a.totalScore, rank: a.overallRank };
+      }).filter(Boolean);
+      const hasRank = ranked.some(r => r.rank != null);
+      ranked.sort((a,b) => hasRank
+        ? ((a.rank != null ? a.rank : 9999) - (b.rank != null ? b.rank : 9999)) || ((b.score||0)-(a.score||0))
+        : (b.score||0)-(a.score||0));
 
-    ranked.forEach((r, i) => {
-      allData.push({
-        '学年': year, '排名': i+1, '学号': r.student.studentId, '姓名': r.student.name,
-        '班级': r.student.className||'', '综测总分': r.score?.toFixed(2)||''
+      ranked.forEach((r, i) => {
+        allData.push({
+          '学年': year, '专业': major || '', '排名': r.rank != null ? r.rank : (i+1),
+          '学号': r.student.studentId, '姓名': r.student.name,
+          '班级': r.student.className||'', '综测总分': r.score?.toFixed(2)||''
+        });
       });
-    });
-    allData.push({ '学年': '', '排名': '', '学号': '', '姓名': '', '班级': '', '综测总分': '' });
+      allData.push({ '学年': '', '专业': '', '排名': '', '学号': '', '姓名': '', '班级': '', '综测总分': '' });
+    }
   }
   exportToExcel(allData, `综测排名_${formatDate(new Date())}.xlsx`, '综测排名');
   showToast('已导出', 'success');
@@ -3784,7 +3926,7 @@ MODULE_RENDERERS.settings = async function(container) {
         ${cloudReady ? '<p><strong>登录：</strong>邮箱+密码登录，数据自动同步到云端</p>' : '<p><strong>首次使用：</strong>设置密码后进入工作台</p>'}
         <p><strong>导入学生：</strong>点击「学生管理」→「导入Excel」，上传包含学号、姓名等信息的Excel表</p>
         <p><strong>导入成绩：</strong>点击「学业成绩」→「导入成绩排名」，上传已算好的排名表（建议含：学号、姓名、班级、学期、加权总分、总排名），系统自动记录并支持趋势/对比分析</p>
-        <p><strong>导入综测：</strong>点击「综测管理」→「导入综测Excel」，Excel需包含学号和综测总分，系统自动计算排名</p>
+        <p><strong>导入综测：</strong>点击「综测管理」→「导入综测Excel」，上传已算好的综测排名表（建议含：学号、姓名、综测总分、排名），上传时选择对应专业与学年；排名按表格导入值记录，支持按专业/学年筛选与趋势对比</p>
         ${cloudReady ? '<p><strong>换设备：</strong>新设备打开网址→邮箱登录→数据自动恢复</p>' : '<p><strong>换设备：</strong>导出备份→网盘→新设备导入恢复</p>'}
       </div>
     </div>
