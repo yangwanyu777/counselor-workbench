@@ -340,6 +340,7 @@ const NAV_ITEMS = [
   { id: 'students', name: '学生管理', icon: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="9" cy="7" r="4" stroke="currentColor" stroke-width="2"/><path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>' },
   { id: 'grades', name: '学业成绩', icon: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M22 10v6M2 10l10-5 10 5-10 5z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M6 12v5c3 3 9 3 12 0v-5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>' },
   { id: 'assessment', name: '综测管理', icon: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M9 11l3 3L22 4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>' },
+  { id: 'awards', name: '获奖情况', icon: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="8" r="6" stroke="currentColor" stroke-width="2"/><path d="M8.21 13.89L7 23l5-3 5 3-1.21-9.12" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>' },
   { id: 'career', name: '生涯规划', icon: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M12 2L2 7l10 5 10-5-10-5z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M2 17l10 5 10-5M2 12l10 5 10-5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>' },
   { id: 'competitions', name: '竞赛指导', icon: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M6 9H4.5a2.5 2.5 0 010-5H6M18 9h1.5a2.5 2.5 0 000-5H18M4 22h16M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22M18 2H6v7a6 6 0 0012 0V2z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>' },
   { id: 'calendar', name: '校历课表', icon: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none"><rect x="3" y="4" width="18" height="18" rx="2" stroke="currentColor" stroke-width="2"/><line x1="16" y1="2" x2="16" y2="6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><line x1="8" y1="2" x2="8" y2="6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><line x1="3" y1="10" x2="21" y2="10" stroke="currentColor" stroke-width="2"/></svg>' },
@@ -352,6 +353,7 @@ const MODULE_TITLES = {
   students: '学生综合数据管理',
   grades: '学业成绩及排名',
   assessment: '综合素质测评管理',
+  awards: '学生获奖情况',
   career: '生涯规划大数据',
   competitions: '辅导员竞赛指导',
   calendar: '校历课表与提醒',
@@ -704,7 +706,7 @@ function cancelPromptModal() {
   closeModal();
 }
 
-// 综测导入：选择「专业 + 学年」弹窗（专业可下拉可选可手输，学年可手输）
+// 综测导入：选择「年级 + 专业 + 学年」弹窗（年级/专业可下拉可选可手输，学年可手输）
 let _pendingAssessResolve = null;
 let _assessImportMeta = null;
 function showAssessmentImportMeta(students, defaultMajor) {
@@ -713,35 +715,39 @@ function showAssessmentImportMeta(students, defaultMajor) {
     // 专业候选：从学生库已有专业去重
     const majors = [...new Set((students || []).map(s => String(s.major || '').trim()).filter(Boolean))].sort();
     if (defaultMajor && !majors.includes(defaultMajor)) majors.unshift(defaultMajor);
+    // 年级候选：从学生库 year 字段（如 2025级）去重
+    const grades = [...new Set((students || []).map(s => String(s.year || '').trim()).filter(Boolean))].sort().reverse();
     // 学年候选：从学生年级 + 最近年份推断
     const nowY = new Date().getFullYear();
     const yearOpts = [];
     for (let y = nowY + 1; y >= nowY - 6; y--) yearOpts.push(`${y}-${y + 1}`);
     showModal('综测导入设置', `
-      <div style="font-size:13px;color:var(--text-muted);margin-bottom:16px">请确认本次表格对应的<strong>专业</strong>与<strong>学年</strong>，导入后系统按此归档。</div>
-      <div class="input-group" style="margin-bottom:16px">
+      <div style="font-size:13px;color:var(--text-muted);margin-bottom:16px">请确认本次表格对应的<strong>年级、专业与学年</strong>，导入后系统按此归档。</div>
+      <div class="input-group" style="margin-bottom:12px">
+        <label class="input-label">年级 <span style="color:var(--text-muted);font-weight:400">（可下拉选择，也可直接输入）</span></label>
+        <input type="text" class="input" id="f_assessGrade" list="assessGradeOpts" value="" placeholder="如：2025级" style="width:100%" onkeydown="if(event.key==='Enter'){document.getElementById('f_assessMajor').focus()}">
+        <datalist id="assessGradeOpts">${grades.map(g => `<option value="${g}"></option>`).join('')}</datalist>
+      </div>
+      <div class="input-group" style="margin-bottom:12px">
         <label class="input-label">所属专业 <span style="color:var(--text-muted);font-weight:400">（可下拉选择，也可直接输入）</span></label>
         <input type="text" class="input" id="f_assessMajor" list="assessMajorOpts" value="${defaultMajor || ''}" placeholder="如：行政管理" style="width:100%" onkeydown="if(event.key==='Enter'){document.getElementById('f_assessYear').focus()}">
-        <datalist id="assessMajorOpts">
-          ${majors.map(m => `<option value="${m}"></option>`).join('')}
-        </datalist>
+        <datalist id="assessMajorOpts">${majors.map(m => `<option value="${m}"></option>`).join('')}</datalist>
       </div>
       <div class="input-group">
         <label class="input-label">学年</label>
         <input type="text" class="input" id="f_assessYear" list="assessYearOpts" value="${yearOpts[1] || ''}" placeholder="如：2025-2026" style="width:100%" onkeydown="if(event.key==='Enter'){confirmAssessImportMeta()}">
-        <datalist id="assessYearOpts">
-          ${yearOpts.map(y => `<option value="${y}"></option>`).join('')}
-        </datalist>
+        <datalist id="assessYearOpts">${yearOpts.map(y => `<option value="${y}"></option>`).join('')}</datalist>
       </div>
     `, `<button class="btn btn-outline" onclick="cancelAssessImportMeta()">取消</button><button class="btn btn-primary" onclick="confirmAssessImportMeta()">确定并导入</button>`);
-    setTimeout(() => { const el = document.getElementById('f_assessMajor'); if (el) { el.focus(); } }, 100);
+    setTimeout(() => { const el = document.getElementById('f_assessGrade'); if (el) { el.focus(); } }, 100);
   });
 }
 function confirmAssessImportMeta() {
+  const grade = document.getElementById('f_assessGrade')?.value.trim() || '';
   const major = document.getElementById('f_assessMajor')?.value.trim() || '';
   const year = document.getElementById('f_assessYear')?.value.trim() || '';
   if (!year) { showToast('请填写学年', 'error'); return; }
-  if (_pendingAssessResolve) { const r = _pendingAssessResolve; _pendingAssessResolve = null; r({ major, year }); }
+  if (_pendingAssessResolve) { const r = _pendingAssessResolve; _pendingAssessResolve = null; r({ grade, major, year }); }
   closeModal();
 }
 function cancelAssessImportMeta() {
@@ -1518,6 +1524,23 @@ function readExcelFile(file) {
   });
 }
 
+// 读取 Excel 为原始二维数组（保留合并表头/多行文本，供获奖矩阵表解析）
+function readExcelRaw(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const wb = XLSX.read(e.target.result, { type: 'array' });
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        const rows = XLSX.utils.sheet_to_json(ws, { header: 1, range: 0, defval: '', raw: false });
+        resolve(rows);
+      } catch (err) { reject(err); }
+    };
+    reader.onerror = reject;
+    reader.readAsArrayBuffer(file);
+  });
+}
+
 function mapStudentRowDynamic(row) {
   const result = {};
 
@@ -1725,6 +1748,9 @@ async function showStudentDetail(id) {
   const grades = (await dbGetByIndex('grades', 'studentId', String(id))).filter(g => g && typeof g.weightedScore === 'number');
   const allAssess = await dbGetAll('assessments');
   const assessments = allAssess.filter(a => String(a.studentId) === String(id));
+  // 该生获奖记录
+  const allAwards = await dbGetAll('awards');
+  const awards = allAwards.filter(a => String(a.studentId) === String(id));
 
   // 综测每学年排名：优先用导入的排名，无则按总分临时算
   const yearGroups = {};
@@ -1765,6 +1791,18 @@ async function showStudentDetail(id) {
         </table>
       </div>
     ` : '<div class="empty-state"><div class="empty-text">暂无综测数据</div></div>'}
+
+    <div class="section-title">🏅 获奖情况（共 ${awards.length} 项）</div>
+    ${awards.length > 0 ? `
+      <div class="table-wrapper">
+        <table class="data-table">
+          <thead><tr><th>学年</th><th>级别</th><th>类型</th><th>奖项名称</th><th>获奖时间</th></tr></thead>
+          <tbody>
+            ${awards.slice().sort((a, b) => (b.academicYear || '').localeCompare(a.academicYear || '') || AWARD_LEVELS.indexOf(a.awardLevel) - AWARD_LEVELS.indexOf(b.awardLevel)).map(a => `<tr><td>${a.academicYear || '-'}</td><td><span class="tag ${a.awardLevel === '国家级' ? 'tag-red' : a.awardLevel === '省部级' ? 'tag-orange' : 'tag-blue'}">${a.awardLevel || '-'}</span></td><td>${a.awardType || '-'}</td><td>${a.awardName || '-'}</td><td>${a.awardDate || '-'}</td></tr>`).join('')}
+          </tbody>
+        </table>
+      </div>
+    ` : '<div class="empty-state"><div class="empty-text">暂无获奖数据</div></div>'}
   `);
 }
 async function toggleCoursePolicyPass(studentId, semester, courseName) {
@@ -2838,6 +2876,13 @@ MODULE_RENDERERS.assessment = async function(container) {
           <button class="btn btn-outline" onclick="exportAssessmentRanking()">📤 导出排名</button>
         </div>
       </div>
+      <!-- 拖拽上传区 -->
+      <div class="drop-zone" id="assessDropZone" style="margin:4px 16px 12px" onclick="triggerAssessmentImport()"
+           ondragover="handleAssessDragOver(event)" ondragleave="handleAssessDragLeave(event)" ondrop="handleAssessDrop(event)">
+        <div class="drop-icon">📊</div>
+        <div class="drop-text">拖拽综测 Excel 到此处，或点击选择文件</div>
+        <div class="drop-hint">上传后可选择年级、专业与学年</div>
+      </div>
       <div class="tabs" id="assessTabs">
         <button class="tab active" onclick="switchAssessTab('ranking', this)">综测排名</button>
         <button class="tab" onclick="switchAssessTab('trend', this)">趋势分析</button>
@@ -2919,44 +2964,208 @@ function updateAssessRanking() {
   }).join('') || '<tr><td colspan="5"><div class="empty-state"><div class="empty-text">暂无数据</div></div></td></tr>';
 }
 
+// 综测趋势 — 顶部各专业综测排名 Top5（仿学业成绩趋势分析结构）
 function renderAssessTrend() {
   const container = document.getElementById('assessTabContent');
   if (state.assessments.length === 0) {
     container.innerHTML = '<div class="empty-state"><div class="empty-icon">📈</div><div class="empty-text">暂无综测数据</div></div>';
     return;
   }
+  const top5 = computeMajorAssessTop5();
   container.innerHTML = `
+    <div class="rank-change-grid">
+      <div class="card" style="padding:16px">
+        <div class="card-title">🏆 各专业综测排名 Top5</div>
+        <div class="card-subtitle" style="margin:4px 0 10px">每个专业取最新学年、综测排名前 5 名（排名数字越小越靠前）</div>
+        ${renderAssessTop5Tables(top5)}
+      </div>
+      <div class="card" style="padding:16px">
+        <div class="card-title">📋 综测数据概览</div>
+        <div class="card-subtitle" style="margin:4px 0 10px">按学年统计记录数与参考人数</div>
+        ${renderAssessOverview()}
+      </div>
+    </div>
     <div class="filter-bar">
-      <select class="select" id="assessTrendStudent" onchange="updateAssessTrend()">
-        ${state.students.slice().sort((a, b) => (a.className || '').localeCompare(b.className || '')).map(s => `<option value="${s.id}">${(s.className || '')} ${s.name}（${s.studentId}）</option>`).join('')}
-      </select>
+      <input type="text" class="input" id="assessTrendSearch" placeholder="🔍 输入姓名或学号搜索…" oninput="filterAssessTrendStudents()" style="min-width:200px" />
+      <select class="select" id="assessTrendStudent" onchange="updateAssessTrend()"></select>
+      <button class="btn btn-outline" onclick="clearAssessTrendSearch()">清除</button>
     </div>
     <div class="chart-container"><canvas id="assessTrendChart"></canvas></div>
     <div class="table-wrapper" style="margin-top:12px">
       <table class="data-table">
-        <thead><tr><th>学年</th><th>综测总分</th><th>排名</th></tr></thead>
+        <thead><tr><th>学年</th><th>专业</th><th>综测总分</th><th>排名</th></tr></thead>
         <tbody id="assessTrendBody"></tbody>
       </table>
     </div>
   `;
+  filterAssessTrendStudents();
+}
+
+// 计算各专业最新学年综测排名 Top5
+function computeMajorAssessTop5() {
+  const studentMap = {};
+  state.students.forEach(s => { studentMap[s.id] = s; });
+  // 按专业+学年分组
+  const groups = {};
+  state.assessments.forEach(a => {
+    const st = studentMap[a.studentId];
+    if (!st) return;
+    const major = (a.major || st.major || '').trim() || '未分专业';
+    const y = a.academicYear || '';
+    const gk = major + '__' + y;
+    (groups[gk] = groups[gk] || []).push({ st, a, major, year: y, rank: a.overallRank, score: a.totalScore });
+  });
+  // 每个专业取最新学年
+  const latestByMajor = {};
+  Object.values(groups).forEach(arr => {
+    const major = arr[0].major;
+    if (!latestByMajor[major] || arr[0].year > latestByMajor[major].year) latestByMajor[major] = { year: arr[0].year, list: arr };
+    else if (arr[0].year === latestByMajor[major].year) latestByMajor[major].list.push(...arr);
+  });
+  const result = {};
+  Object.keys(latestByMajor).sort().forEach(major => {
+    const g = latestByMajor[major];
+    // 有导入排名按排名升序，否则按总分降序
+    const hasRank = g.list.some(x => x.rank != null);
+    const sorted = g.list.slice().sort((a, b) => hasRank
+      ? ((a.rank != null ? a.rank : 9999) - (b.rank != null ? b.rank : 9999)) || ((b.score || 0) - (a.score || 0))
+      : (b.score || 0) - (a.score || 0));
+    result[major] = { year: g.year, top: sorted.slice(0, 5).map((x, i) => ({ id: x.st.id, name: x.st.name, rank: x.rank != null ? x.rank : (i + 1), score: x.score })) };
+  });
+  return result;
+}
+
+// 渲染各专业 Top5 表格
+function renderAssessTop5Tables(top5) {
+  const majors = Object.keys(top5);
+  if (majors.length === 0) return '<div class="empty-text" style="padding:8px 0">暂无综测排名数据</div>';
+  return majors.map(major => {
+    const g = top5[major];
+    return `
+      <div style="margin-bottom:14px">
+        <div style="font-size:13px;font-weight:600;color:var(--primary);margin-bottom:6px">${major} <span style="font-weight:400;color:var(--text-muted)">(${g.year || '—'})</span></div>
+        <div class="table-wrapper"><table class="data-table">
+          <thead><tr><th>排名</th><th>姓名</th><th>综测总分</th></tr></thead>
+          <tbody>
+            ${g.top.map(t => `<tr class="row-clickable" title="点击查看 ${t.name} 综测趋势" onclick="jumpAssessTrend('${t.id}')"><td><span class="tag ${t.rank <= 3 ? 'tag-red' : 'tag-blue'}">${t.rank}</span></td><td>${t.name}</td><td style="font-weight:700">${t.score != null ? t.score.toFixed(2) : '-'}</td></tr>`).join('')}
+          </tbody>
+        </table></div>
+      </div>
+    `;
+  }).join('');
+}
+
+// 综测数据概览（按学年）
+function renderAssessOverview() {
+  const byYear = {};
+  state.assessments.forEach(a => {
+    const y = a.academicYear || '未填学年';
+    (byYear[y] = byYear[y] || []).push(a);
+  });
+  const years = Object.keys(byYear).sort().reverse();
+  if (years.length === 0) return '<div class="empty-text" style="padding:8px 0">暂无数据</div>';
+  return `<div class="table-wrapper"><table class="data-table">
+    <thead><tr><th>学年</th><th>记录数</th><th>学生数</th><th>专业数</th></tr></thead>
+    <tbody>${years.map(y => {
+      const arr = byYear[y];
+      return `<tr><td>${y}</td><td>${arr.length}</td><td>${new Set(arr.map(a => a.studentId)).size}</td><td>${new Set(arr.map(a => a.major).filter(Boolean)).size}</td></tr>`;
+    }).join('')}</tbody>
+  </table></div>`;
+}
+
+// 根据搜索关键词过滤综测趋势学生下拉（学生库中有综测记录的学生）
+function renderAssessTrendStudentOptions(keyword) {
+  const kw = (keyword || '').trim().toLowerCase();
+  const withData = new Set(state.assessments.map(a => String(a.studentId)));
+  const list = state.students.filter(s => {
+    if (!withData.has(String(s.id))) return false;
+    if (!kw) return true;
+    return String(s.studentId).toLowerCase().includes(kw) || String(s.name).toLowerCase().includes(kw);
+  }).sort((a, b) => (a.className || '').localeCompare(b.className || ''));
+  return list.map(s => `<option value="${s.id}">${(s.className || '')} ${s.name}（${s.studentId}）</option>`).join('');
+}
+
+function filterAssessTrendStudents() {
+  const input = document.getElementById('assessTrendSearch');
+  const sel = document.getElementById('assessTrendStudent');
+  if (!input || !sel) return;
+  const kw = input.value;
+  sel.innerHTML = renderAssessTrendStudentOptions(kw);
+  if (sel.options.length > 0) {
+    sel.selectedIndex = 0;
+    updateAssessTrend();
+  } else {
+    const body = document.getElementById('assessTrendBody');
+    if (body) body.innerHTML = '<tr><td colspan="4">未找到匹配的学生</td></tr>';
+    const ctx = document.getElementById('assessTrendChart');
+    if (ctx && state.charts.assessTrend) { state.charts.assessTrend.destroy(); state.charts.assessTrend = null; }
+  }
+}
+
+function clearAssessTrendSearch() {
+  const input = document.getElementById('assessTrendSearch');
+  if (input) input.value = '';
+  filterAssessTrendStudents();
+  if (input) input.focus();
+}
+
+// 点击各专业 Top5 学生，定位到其综测趋势
+function jumpAssessTrend(studentId) {
+  const input = document.getElementById('assessTrendSearch');
+  const sel = document.getElementById('assessTrendStudent');
+  if (!input || !sel) return;
+  const st = (state.students || []).find(s => String(s.id) === String(studentId));
+  if (!st) return;
+  input.value = st.studentId || st.name || '';
+  filterAssessTrendStudents();
+  if (sel.value !== String(studentId)) sel.value = String(studentId);
   updateAssessTrend();
+  const chart = document.getElementById('assessTrendChart');
+  if (chart) chart.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
+// 综测排名：按「学年+专业」分组算排名（用导入值优先）
+function getAssessRankMap() {
+  const rankMap = {};
+  // 用学生所属专业补全记录缺失的 major
+  const studentMap = {};
+  state.students.forEach(s => { studentMap[s.id] = s; });
+  const groups = {};
+  state.assessments.forEach(a => {
+    const st = studentMap[a.studentId];
+    const major = (a.major || (st && st.major) || '').trim() || '未分专业';
+    const y = a.academicYear || '';
+    const gk = y + '__' + major;
+    (groups[gk] = groups[gk] || []).push(a);
+  });
+  Object.values(groups).forEach(arr => {
+    const hasRank = arr.some(a => a.overallRank != null);
+    const sorted = arr.slice().sort((x, z) => hasRank
+      ? ((x.overallRank != null ? x.overallRank : 9999) - (z.overallRank != null ? z.overallRank : 9999)) || ((z.totalScore || 0) - (x.totalScore || 0))
+      : (z.totalScore || 0) - (x.totalScore || 0));
+    sorted.forEach((a, i) => { rankMap[String(a.studentId) + '__' + a.academicYear + '__' + (a.major || (studentMap[a.studentId] && studentMap[a.studentId].major) || '未分专业')] = a.overallRank != null ? a.overallRank : (i + 1); });
+  });
+  return rankMap;
 }
 
 function updateAssessTrend() {
-  const sid = document.getElementById('assessTrendStudent').value;
+  const sel = document.getElementById('assessTrendStudent');
+  if (!sel) return;
+  const sid = sel.value;
   const studentMap = {};
   state.students.forEach(s => { studentMap[s.id] = s; });
   const st = studentMap[sid];
   const recs = state.assessments.filter(a => String(a.studentId) === String(sid)).sort((a, b) => a.academicYear.localeCompare(b.academicYear));
-  const yearGroups = {};
-  state.assessments.forEach(a => { (yearGroups[a.academicYear] = yearGroups[a.academicYear] || []).push(a); });
-  const rankMap = {};
-  Object.keys(yearGroups).forEach(y => { const arr = yearGroups[y].slice().sort((x, yy) => (yy.totalScore || 0) - (x.totalScore || 0)); arr.forEach((a, i) => { rankMap[String(a.studentId) + '_' + y] = (a.overallRank != null ? a.overallRank : i + 1); }); });
+  const rankMap = getAssessRankMap();
   const labels = recs.map(r => r.academicYear);
   const scores = recs.map(r => r.totalScore);
-  const ranks = recs.map(r => rankMap[String(sid) + '_' + r.academicYear]);
+  const ranks = recs.map(r => {
+    if (r.overallRank != null) return r.overallRank;
+    const major = (r.major || (st && st.major) || '未分专业').trim() || '未分专业';
+    return rankMap[String(sid) + '__' + r.academicYear + '__' + major];
+  });
   const body = document.getElementById('assessTrendBody');
-  if (body) body.innerHTML = recs.map((r, i) => `<tr><td>${r.academicYear}</td><td>${r.totalScore != null ? r.totalScore.toFixed(2) : '-'}</td><td>${ranks[i] != null ? ranks[i] : '-'}</td></tr>`).join('') || '<tr><td colspan="3">暂无数据</td></tr>';
+  if (body) body.innerHTML = recs.map((r, i) => `<tr><td>${r.academicYear}</td><td>${r.major || (st && st.major) || '-'}</td><td>${r.totalScore != null ? r.totalScore.toFixed(2) : '-'}</td><td>${ranks[i] != null ? ranks[i] : '-'}</td></tr>`).join('') || '<tr><td colspan="4">暂无数据</td></tr>';
   const ctx = document.getElementById('assessTrendChart');
   if (ctx) {
     if (state.charts.assessTrend) state.charts.assessTrend.destroy();
@@ -2975,7 +3184,7 @@ function updateAssessTrend() {
           y: { position: 'left', title: { display: true, text: '综测总分' } },
           y1: { position: 'right', title: { display: true, text: '排名' }, reverse: true, grid: { drawOnChartArea: false } }
         },
-        plugins: { title: { display: true, text: (st ? st.name + ' ' : '') + '综测趋势' } }
+        plugins: { title: { display: true, text: (st ? st.name + ' ' : '') + '综测排名趋势' } }
       }
     });
   }
@@ -2984,6 +3193,28 @@ function triggerAssessmentImport() {
   state.fileImportCallback = handleAssessmentImport;
   document.getElementById('fileInput').click();
 }
+
+// 综测导入拖拽上传
+function handleAssessDragOver(event) {
+  event.preventDefault(); event.stopPropagation();
+  event.currentTarget.classList.add('drag-over');
+}
+function handleAssessDragLeave(event) {
+  event.preventDefault(); event.stopPropagation();
+  event.currentTarget.classList.remove('drag-over');
+}
+function handleAssessDrop(event) {
+  event.preventDefault(); event.stopPropagation();
+  event.currentTarget.classList.remove('drag-over');
+  const file = event.dataTransfer.files[0];
+  if (!file) return;
+  if (!/\.(xlsx|xls|csv)$/i.test(file.name)) { showToast('请拖入 Excel 文件（.xlsx/.xls/.csv）', 'error'); return; }
+  handleAssessmentImport(file);
+}
+
+// 全局兜底：阻止把 Excel 拖到页面非拖放区时被浏览器直接打开/下载
+document.addEventListener('dragover', (e) => { if (e.dataTransfer && Array.from(e.dataTransfer.types || []).includes('Files')) e.preventDefault(); });
+document.addEventListener('drop', (e) => { if (e.dataTransfer && Array.from(e.dataTransfer.types || []).includes('Files') && !e.target.closest('.drop-zone')) e.preventDefault(); });
 
 async function handleAssessmentImport(file) {
   showLoading('正在解析综测Excel...');
@@ -3032,6 +3263,7 @@ async function handleAssessmentImport(file) {
     const meta = await showAssessmentImportMeta(students, guessedMajor);
     if (!meta) return;
     const major = meta.major || '';
+    const grade = meta.grade || '';
     const year = meta.year;
     showLoading('正在解析综测Excel...');
 
@@ -3070,6 +3302,7 @@ async function handleAssessmentImport(file) {
       const rec = {
         studentId: String(student.id),
         academicYear: year,
+        grade,
         major,
         totalScore: isNaN(totalScore) ? null : totalScore,
         overallRank: (rank != null && !isNaN(rank)) ? rank : null,
@@ -3087,7 +3320,7 @@ async function handleAssessmentImport(file) {
     hideLoading();
     const headInfo = `学号=${sidCol || '无'}, 姓名=${nameCol || '无'}, 排名=${rankCol || '无'}, 综测总分=${scoreCol || '无'}`;
     console.log('[综测导入]', headInfo, '专业=' + major, '学年=' + year, '行数=' + data.length, '未匹配样例=', unmatchedSamples);
-    let msg = `导入完成（${year}${major ? ' · ' + major : ''}）：新增 ${toAdd.length} 条，更新 ${toUpdate.length} 条`;
+    let msg = `导入完成（${grade ? grade + ' · ' : ''}${year}${major ? ' · ' + major : ''}）：新增 ${toAdd.length} 条，更新 ${toUpdate.length} 条`;
     if (unmatched > 0) {
       msg += `，${unmatched} 人未匹配（${unmatchedSamples.join('、')}等）`;
       if (unmatched === data.length) msg += '。请先在「学生管理」导入学生名单，再导入综测排名。';
@@ -3138,6 +3371,565 @@ async function exportAssessmentRanking() {
   }
   exportToExcel(allData, `综测排名_${formatDate(new Date())}.xlsx`, '综测排名');
   showToast('已导出', 'success');
+}
+
+// ========== 获奖情况模块 ==========
+const AWARD_LEVELS = ['国家级', '省部级', '校级', '院级'];
+const AWARD_TYPES = ['个人', '集体'];
+
+// 触发获奖 Excel 导入（复用全局 fileInput）
+function triggerAwardImport() {
+  state.fileImportCallback = handleAwardImport;
+  document.getElementById('fileInput').click();
+}
+
+// 获奖导入拖拽
+function handleAwardDragOver(event) {
+  event.preventDefault(); event.stopPropagation();
+  event.currentTarget.classList.add('drag-over');
+}
+function handleAwardDragLeave(event) {
+  event.preventDefault(); event.stopPropagation();
+  event.currentTarget.classList.remove('drag-over');
+}
+function handleAwardDrop(event) {
+  event.preventDefault(); event.stopPropagation();
+  event.currentTarget.classList.remove('drag-over');
+  const file = event.dataTransfer.files[0];
+  if (!file) return;
+  if (!/\.(xlsx|xls|csv)$/i.test(file.name)) { showToast('请拖入 Excel 文件（.xlsx/.xls/.csv）', 'error'); return; }
+  handleAwardImport(file);
+}
+
+// 解析获奖单元格里的多行文本，如：
+// "1.2022年12月：\"你最珍贵\"公益奖先进个人\n2.2023年6月：一等奖学金"
+function parseAwardCellText(text) {
+  if (!text || !String(text).trim()) return [];
+  const raw = String(text).replace(/\r/g, '\n');
+  // 按换行或「序号.」拆分成多条
+  const parts = raw.split(/\n+/).map(s => s.trim()).filter(Boolean);
+  const results = [];
+  for (let p of parts) {
+    // 去掉开头序号（1. / 1、/ (1) / ① 等）
+    p = p.replace(/^\s*[(（]?\d+[)）.、．]?\s*/, '').trim();
+    if (!p) continue;
+    // 提取日期：2022年12月 / 2022-12 / 2022.12 / 2022年
+    let date = '';
+    let name = p;
+    const dm = p.match(/(\d{4})\s*[年\-./]\s*(\d{1,2})?\s*月?/);
+    if (dm) {
+      date = dm[1] + '-' + (dm[2] ? String(dm[2]).padStart(2, '0') : '');
+      // 去掉日期及其后的分隔符（：: — -）作为奖项名
+      name = p.slice(dm.index + dm[0].length).replace(/^[\s：:，,、\-—]+/, '').trim();
+    }
+    // 去掉奖项名末尾多余的标点
+    name = name.replace(/[；;]+$/, '').trim();
+    if (!name) name = p;
+    results.push({ awardName: name, awardDate: date });
+  }
+  return results;
+}
+
+// 归一化获奖级别/类型（模糊匹配）
+function normAwardLevel(v) {
+  const s = String(v || '').replace(/\s/g, '');
+  if (/国家|国级/.test(s)) return '国家级';
+  if (/省|部/.test(s)) return '省部级';
+  if (/校/.test(s)) return '校级';
+  if (/院/.test(s)) return '院级';
+  return s || '其他';
+}
+function normAwardType(v) {
+  const s = String(v || '').replace(/\s/g, '');
+  if (/集体|团体|团队/.test(s)) return '集体';
+  if (/个人/.test(s)) return '个人';
+  return s || '个人';
+}
+
+// 获奖 Excel 导入主函数：自动识别「明细表」与「矩阵表」两种格式
+async function handleAwardImport(file) {
+  showLoading('正在解析获奖Excel...');
+  try {
+    const fileName = file.name || '';
+    // 导入时先选学年（获奖统计以学年归档）
+    const nowY = new Date().getFullYear();
+    const yearOpts = [];
+    for (let y = nowY + 1; y >= nowY - 6; y--) yearOpts.push(`${y}-${y + 1}`);
+    const meta = await showAwardImportMeta(fileName, yearOpts);
+    if (!meta) { hideLoading(); return; }
+    const academicYear = meta.year;
+
+    const students = await dbGetAll('students');
+    const bySid = {}, byName = {};
+    students.forEach(s => {
+      const sid = normalizeStudentId(s.studentId);
+      if (sid) bySid[sid] = s;
+      const nm = String(s.name || '').trim();
+      if (nm) byName[nm] = s;
+    });
+
+    // 先尝试按「原始二维数组」读取，检测是否为矩阵表
+    const rawRows = await readExcelRaw(file);
+    const isMatrix = rawRows.some(r => Array.isArray(r) && r.some(c => /个人获奖情况|集体获奖情况/.test(String(c || ''))));
+
+    let records = [];
+    let format = '';
+    if (isMatrix) {
+      format = '矩阵表';
+      records = parseAwardMatrix(rawRows, students, bySid, byName, academicYear);
+    } else {
+      format = '明细表';
+      // 明细表：一行一个奖项，用 readExcelFile 自动表头检测
+      const data = await readExcelFile(file);
+      records = parseAwardDetail(data, students, bySid, byName, academicYear);
+    }
+
+    if (records.length === 0) {
+      hideLoading();
+      showToast('未能解析出获奖记录。请确认表格格式：明细表需含「姓名/奖项名称/获奖等级」列；矩阵表需含「个人获奖情况/集体获奖情况」表头', 'error');
+      return;
+    }
+
+    // 批量写入
+    if (state.awards == null) state.awards = await dbGetAll('awards');
+    const toAdd = [], toUpdate = [];
+    const existList = await dbGetAll('awards');
+    const existByKey = {};
+    existList.forEach(a => {
+      const k = [a.studentId || a.studentName || '', a.awardLevel, a.awardType, a.awardName, a.awardDate, a.academicYear].join('|');
+      existByKey[k] = a;
+    });
+    for (const rec of records) {
+      const k = [rec.studentId || rec.studentName || '', rec.awardLevel, rec.awardType, rec.awardName, rec.awardDate, rec.academicYear].join('|');
+      if (existByKey[k]) { rec.id = existByKey[k].id; rec.createdAt = existByKey[k].createdAt || Date.now(); toUpdate.push(rec); }
+      else { rec.createdAt = Date.now(); toAdd.push(rec); }
+    }
+    for (const rec of toUpdate) await dbPut('awards', rec);
+    if (toAdd.length) await dbAddBatch('awards', toAdd);
+
+    const matched = records.filter(r => r.studentId).length;
+    const unmatched = records.length - matched;
+    hideLoading();
+    let msg = `导入完成（${academicYear} · ${format}）：新增 ${toAdd.length} 条，更新 ${toUpdate.length} 条，共解析 ${records.length} 条获奖`;
+    if (unmatched > 0) msg += `，其中 ${unmatched} 条未匹配到学生（已保留姓名，可在明细中查看）`;
+    showToast(msg, unmatched === records.length ? 'warning' : 'success');
+    state.awards = await dbGetAll('awards');
+    navigateTo('awards');
+  } catch (err) {
+    hideLoading();
+    console.error(err);
+    showToast('导入失败：' + err.message, 'error');
+  }
+}
+
+// 解析「矩阵表」：专业/姓名/学号 + 个人获奖(院/校/省/国) + 集体获奖(院/校/省/国)
+function parseAwardMatrix(rawRows, students, bySid, byName, academicYear) {
+  const records = [];
+  if (!rawRows || rawRows.length < 3) return records;
+  // 找到含「姓名」「学号」的表头行（通常第2行，0-based=1）
+  let headerIdx = -1;
+  for (let i = 0; i < Math.min(rawRows.length, 8); i++) {
+    const row = rawRows[i] || [];
+    if (row.some(c => /^姓名$/.test(String(c || '').trim())) && row.some(c => /学号/.test(String(c || '')))) { headerIdx = i; break; }
+  }
+  if (headerIdx < 0) return records;
+  const hRow = rawRows[headerIdx] || [];
+  const subRow = rawRows[headerIdx + 1] || [];
+  const idxOf = (re) => hRow.findIndex(c => re.test(String(c || '')));
+  const colMajor = idxOf(/^专业$/);
+  const colName = idxOf(/^姓名$/);
+  const colSid = idxOf(/学号|考号/);
+  // 找到「个人获奖情况」「集体获奖情况」起始列
+  const colPersonal = idxOf(/个人获奖/);
+  const colGroup = idxOf(/集体获奖/);
+  // 子表头：院级/校级/省部级/国家级 所在列（从 subRow 找，或按固定4列推算）
+  const levelAt = (startCol) => {
+    const map = {};
+    if (startCol < 0) return map;
+    for (let c = startCol; c < startCol + 4 && c < subRow.length; c++) {
+      const lv = normAwardLevel(subRow[c]);
+      if (AWARD_LEVELS.includes(lv)) map[lv] = c;
+    }
+    // 若子表头没识别到，退回固定顺序 [院,校,省,国]
+    if (Object.keys(map).length === 0) { map['院级'] = startCol; map['校级'] = startCol + 1; map['省部级'] = startCol + 2; map['国家级'] = startCol + 3; }
+    return map;
+  };
+  const personalLv = levelAt(colPersonal);
+  const groupLv = levelAt(colGroup);
+
+  for (let r = headerIdx + 2; r < rawRows.length; r++) {
+    const row = rawRows[r] || [];
+    const rawName = String(row[colName] ?? '').trim();
+    const rawSid = normalizeStudentId(row[colSid]);
+    const rawMajor = String(row[colMajor] ?? '').trim();
+    // 跳过空行、示例行、表头重复行
+    if (!rawName && !rawSid) continue;
+    if (/某某|XXXX|示例|姓名/.test(rawName)) continue;
+    const student = (rawSid && bySid[rawSid]) || (rawName && byName[rawName]) || null;
+    const base = {
+      studentId: student ? String(student.id) : '',
+      studentName: rawName || (student ? student.name : ''),
+      major: rawMajor || (student ? student.major || '' : ''),
+      className: student ? student.className || '' : '',
+      academicYear, updatedAt: Date.now()
+    };
+    // 个人获奖的四个级别列
+    Object.entries(personalLv).forEach(([lv, c]) => {
+      parseAwardCellText(row[c]).forEach(item => {
+        records.push({ ...base, awardLevel: lv, awardType: '个人', awardName: item.awardName, awardDate: item.awardDate, remark: '', source: 'matrix' });
+      });
+    });
+    // 集体获奖的四个级别列
+    Object.entries(groupLv).forEach(([lv, c]) => {
+      parseAwardCellText(row[c]).forEach(item => {
+        records.push({ ...base, awardLevel: lv, awardType: '集体', awardName: item.awardName, awardDate: item.awardDate, remark: '', source: 'matrix' });
+      });
+    });
+  }
+  return records;
+}
+
+// 解析「明细表」：在线收集表导出的一行一奖项格式
+function parseAwardDetail(data, students, bySid, byName, academicYear) {
+  const records = [];
+  if (!data || data.length === 0) return records;
+  const keys = Object.keys(data[0] || {});
+  const colOf = (candidates) => {
+    for (const c of candidates) {
+      const hit = keys.find(k => cleanColumnName(k) === cleanColumnName(c));
+      if (hit) return hit;
+      const fuzzy = keys.find(k => cleanColumnName(k).includes(cleanColumnName(c)));
+      if (fuzzy) return fuzzy;
+    }
+    return null;
+  };
+  const colSid = colOf(['学号', '考号', '学籍号']);
+  const colName = colOf(['姓名', '学生姓名']);
+  const colLevel = colOf(['获奖等级', '获奖级别', '级别', '等级']);
+  const colType = colOf(['获奖类型', '类型']);
+  const colAward = colOf(['奖项名称', '奖项', '获奖名称', '获奖项目']);
+  const colDate = colOf(['获奖时间', '获奖日期', '时间']);
+  const colMajor = colOf(['专业', '专业名称']);
+  const colRemark = colOf(['备注', '说明']);
+  if (!colAward && !colLevel) return records;
+  for (const row of data) {
+    const rawSid = colSid ? normalizeStudentId(row[colSid]) : '';
+    const rawName = colName ? String(row[colName] || '').trim() : '';
+    const student = (rawSid && bySid[rawSid]) || (rawName && byName[rawName]) || null;
+    const awardName = colAward ? String(row[colAward] || '').trim() : '';
+    const awardLevel = normAwardLevel(colLevel ? row[colLevel] : '');
+    const awardType = normAwardType(colType ? row[colType] : '');
+    if (!awardName) continue;
+    // 获奖时间归一化：2025-10 / 2025年10月 统一为 2025-10
+    let awardDate = colDate ? String(row[colDate] || '').trim() : '';
+    const dm = awardDate.match(/(\d{4})\s*[年\-./]\s*(\d{1,2})?/);
+    if (dm) awardDate = dm[1] + '-' + (dm[2] ? String(dm[2]).padStart(2, '0') : '');
+    records.push({
+      studentId: student ? String(student.id) : '',
+      studentName: rawName || (student ? student.name : ''),
+      major: (colMajor ? String(row[colMajor] || '').trim() : '') || (student ? student.major || '' : ''),
+      className: student ? student.className || '' : '',
+      awardLevel, awardType, awardName, awardDate,
+      remark: colRemark ? String(row[colRemark] || '').trim() : '',
+      academicYear, source: 'detail', updatedAt: Date.now()
+    });
+  }
+  return records;
+}
+
+// 获奖导入：选学年弹窗
+function showAwardImportMeta(fileName, yearOpts) {
+  return new Promise((resolve) => {
+    _pendingAwardResolve = resolve;
+    // 从文件名猜年级→学年（如"2025级获奖信息"→2025-2026）
+    const ym = String(fileName).match(/(20\d{2})\s*级/);
+    const guessed = ym ? `${ym[1]}-${Number(ym[1]) + 1}` : (yearOpts[1] || '');
+    showModal('获奖导入设置', `
+      <div style="font-size:13px;color:var(--text-muted);margin-bottom:16px">请确认本次获奖表对应的<strong>学年</strong>。系统支持自动识别「在线收集表导出的明细表」和「专业×等级矩阵表」两种格式。</div>
+      <div class="input-group">
+        <label class="input-label">归档学年</label>
+        <input type="text" class="input" id="f_awardYear" list="awardYearOpts" value="${guessed}" placeholder="如：2025-2026" style="width:100%" onkeydown="if(event.key==='Enter'){confirmAwardImportMeta()}">
+        <datalist id="awardYearOpts">${yearOpts.map(y => `<option value="${y}"></option>`).join('')}</datalist>
+      </div>
+    `, `<button class="btn btn-outline" onclick="cancelAwardImportMeta()">取消</button><button class="btn btn-primary" onclick="confirmAwardImportMeta()">确定并导入</button>`);
+    setTimeout(() => { const el = document.getElementById('f_awardYear'); if (el) { el.focus(); el.select(); } }, 100);
+  });
+}
+let _pendingAwardResolve = null;
+function confirmAwardImportMeta() {
+  const year = document.getElementById('f_awardYear')?.value.trim() || '';
+  if (!year) { showToast('请填写学年', 'error'); return; }
+  if (_pendingAwardResolve) { const r = _pendingAwardResolve; _pendingAwardResolve = null; r({ year }); }
+  closeModal();
+}
+function cancelAwardImportMeta() {
+  if (_pendingAwardResolve) { const r = _pendingAwardResolve; _pendingAwardResolve = null; r(null); }
+  closeModal();
+}
+
+// 手动添加获奖记录
+function openAwardManualAdd() {
+  const majors = [...new Set((state.students || []).map(s => s.major).filter(Boolean))].sort();
+  const nowY = new Date().getFullYear();
+  showModal('手动添加获奖', `
+    <div class="input-group" style="margin-bottom:12px"><label class="input-label">姓名 *</label><input type="text" class="input" id="m_awardName" list="m_studentOpts" placeholder="输入姓名（学生库中匹配）" style="width:100%"><datalist id="m_studentOpts">${(state.students || []).map(s => `<option value="${s.name}"></option>`).join('')}</datalist></div>
+    <div class="input-group" style="margin-bottom:12px"><label class="input-label">专业</label><input type="text" class="input" id="m_major" list="m_majorOpts" style="width:100%"><datalist id="m_majorOpts">${majors.map(m => `<option value="${m}"></option>`).join('')}</datalist></div>
+    <div style="display:flex;gap:12px;margin-bottom:12px">
+      <div class="input-group" style="flex:1"><label class="input-label">获奖级别</label><select class="select" id="m_level" style="width:100%">${AWARD_LEVELS.map(l => `<option value="${l}">${l}</option>`).join('')}</select></div>
+      <div class="input-group" style="flex:1"><label class="input-label">类型</label><select class="select" id="m_type" style="width:100%">${AWARD_TYPES.map(t => `<option value="${t}">${t}</option>`).join('')}</select></div>
+    </div>
+    <div class="input-group" style="margin-bottom:12px"><label class="input-label">奖项名称 *</label><input type="text" class="input" id="m_title" placeholder="如：一等奖学金" style="width:100%"></div>
+    <div style="display:flex;gap:12px;margin-bottom:12px">
+      <div class="input-group" style="flex:1"><label class="input-label">获奖时间</label><input type="text" class="input" id="m_date" placeholder="如：2025-10" style="width:100%"></div>
+      <div class="input-group" style="flex:1"><label class="input-label">学年</label><input type="text" class="input" id="m_year" value="${nowY}-${nowY + 1}" style="width:100%"></div>
+    </div>
+  `, `<button class="btn btn-outline" onclick="closeModal()">取消</button><button class="btn btn-primary" onclick="saveAwardManual()">保存</button>`);
+}
+
+async function saveAwardManual() {
+  const name = document.getElementById('m_awardName')?.value.trim() || '';
+  const title = document.getElementById('m_title')?.value.trim() || '';
+  if (!name || !title) { showToast('请填写姓名和奖项名称', 'error'); return; }
+  const student = (state.students || []).find(s => s.name === name);
+  const rec = {
+    studentId: student ? String(student.id) : '',
+    studentName: name,
+    major: document.getElementById('m_major')?.value.trim() || (student ? student.major || '' : ''),
+    className: student ? student.className || '' : '',
+    awardLevel: document.getElementById('m_level')?.value || '校级',
+    awardType: document.getElementById('m_type')?.value || '个人',
+    awardName: title,
+    awardDate: document.getElementById('m_date')?.value.trim() || '',
+    academicYear: document.getElementById('m_year')?.value.trim() || '',
+    remark: '', source: 'manual', createdAt: Date.now(), updatedAt: Date.now()
+  };
+  await dbAdd('awards', rec);
+  state.awards = await dbGetAll('awards');
+  closeModal();
+  renderAwardStats();
+  showToast('已添加', 'success');
+}
+
+async function exportAwards() {
+  const awards = state.awards || [];
+  if (awards.length === 0) { showToast('暂无获奖数据', 'error'); return; }
+  exportToExcel(awards.map(a => ({
+    '学年': a.academicYear || '', '姓名': a.studentName || '', '学号': (state.students || []).find(s => String(s.id) === String(a.studentId))?.studentId || '',
+    '专业': a.major || '', '班级': a.className || '', '获奖级别': a.awardLevel || '', '获奖类型': a.awardType || '',
+    '奖项名称': a.awardName || '', '获奖时间': a.awardDate || '', '备注': a.remark || ''
+  })), `学生获奖情况_${formatDate(new Date())}.xlsx`, '获奖情况');
+  showToast('已导出', 'success');
+}
+
+MODULE_RENDERERS.awards = async function(container) {
+  state.awards = await dbGetAll('awards');
+  state.students = await dbGetAll('students');
+  const years = [...new Set((state.awards || []).map(a => a.academicYear).filter(Boolean))].sort().reverse();
+  const total = (state.awards || []).length;
+  const winnerCount = new Set((state.awards || []).map(a => a.studentId).filter(Boolean)).size;
+  container.innerHTML = `
+    <div class="card">
+      <div class="card-header">
+        <div>
+          <div class="card-title">🏅 学生获奖情况</div>
+          <div class="card-subtitle">${total} 条获奖记录 · ${winnerCount} 名学生 · ${years.length} 个学年</div>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn btn-primary" onclick="triggerAwardImport()">📥 导入获奖Excel</button>
+          <button class="btn btn-outline" onclick="openAwardManualAdd()">➕ 手动添加</button>
+          <button class="btn btn-outline" onclick="exportAwards()">📤 导出</button>
+        </div>
+      </div>
+      <!-- 拖拽上传区 -->
+      <div class="drop-zone" id="awardDropZone" style="margin:4px 16px 12px" onclick="triggerAwardImport()"
+           ondragover="handleAwardDragOver(event)" ondragleave="handleAwardDragLeave(event)" ondrop="handleAwardDrop(event)">
+        <div class="drop-icon">📄</div>
+        <div class="drop-text">拖拽获奖 Excel 到此处，或点击选择文件</div>
+        <div class="drop-hint">支持「在线收集表导出的明细表」或「专业×等级矩阵表」两种格式，自动识别</div>
+      </div>
+      <div class="tabs" id="awardTabs">
+        <button class="tab active" onclick="switchAwardTab('stats', this)">统计分析</button>
+        <button class="tab" onclick="switchAwardTab('list', this)">获奖明细</button>
+      </div>
+      <div id="awardTabContent"></div>
+    </div>
+  `;
+  renderAwardStats();
+};
+
+function switchAwardTab(tab, btn) {
+  document.querySelectorAll('#awardTabs .tab').forEach(t => t.classList.remove('active'));
+  btn.classList.add('active');
+  if (tab === 'stats') renderAwardStats();
+  else if (tab === 'list') renderAwardList();
+}
+
+// 获奖统计分析：各类奖项总数 + 分布图
+function renderAwardStats() {
+  const container = document.getElementById('awardTabContent');
+  const awards = state.awards || [];
+  if (awards.length === 0) {
+    container.innerHTML = '<div class="empty-state"><div class="empty-icon">🏅</div><div class="empty-text">暂无获奖数据，请导入获奖 Excel 或手动添加</div></div>';
+    return;
+  }
+  // 等级 × 类型 交叉统计
+  const cross = {};
+  AWARD_LEVELS.forEach(l => { cross[l] = { '个人': 0, '集体': 0 }; });
+  awards.forEach(a => {
+    const lv = AWARD_LEVELS.includes(a.awardLevel) ? a.awardLevel : '其他';
+    if (!cross[lv]) cross[lv] = { '个人': 0, '集体': 0 };
+    const tp = AWARD_TYPES.includes(a.awardType) ? a.awardType : '个人';
+    cross[lv][tp]++;
+  });
+  const levelCounts = {};
+  AWARD_LEVELS.forEach(l => { levelCounts[l] = awards.filter(a => a.awardLevel === l).length; });
+  const typeCounts = { '个人': awards.filter(a => a.awardType === '个人').length, '集体': awards.filter(a => a.awardType === '集体').length };
+  const winnerCount = new Set(awards.map(a => a.studentId).filter(Boolean)).size;
+
+  container.innerHTML = `
+    <div class="stat-grid" style="margin:16px">
+      <div class="stat-card" style="border-left-color:#E53E3E"><div class="stat-label">国家级</div><div class="stat-value">${levelCounts['国家级']}</div></div>
+      <div class="stat-card" style="border-left-color:#DD6B20"><div class="stat-label">省部级</div><div class="stat-value">${levelCounts['省部级']}</div></div>
+      <div class="stat-card" style="border-left-color:#3182CE"><div class="stat-label">校级</div><div class="stat-value">${levelCounts['校级']}</div></div>
+      <div class="stat-card" style="border-left-color:#38A169"><div class="stat-label">院级</div><div class="stat-value">${levelCounts['院级']}</div></div>
+      <div class="stat-card" style="border-left-color:#805AD5"><div class="stat-label">获奖人次</div><div class="stat-value">${awards.length}</div></div>
+      <div class="stat-card" style="border-left-color:#00B5AD"><div class="stat-label">获奖学生</div><div class="stat-value">${winnerCount}</div></div>
+    </div>
+    <div class="rank-change-grid" style="margin:0 16px 16px">
+      <div class="card" style="padding:16px">
+        <div class="card-title">📊 各级别获奖数量</div>
+        <div class="chart-container" style="height:240px"><canvas id="awardLevelChart"></canvas></div>
+      </div>
+      <div class="card" style="padding:16px">
+        <div class="card-title">👥 个人 / 集体 分布</div>
+        <div class="chart-container" style="height:240px"><canvas id="awardTypeChart"></canvas></div>
+      </div>
+    </div>
+    <div class="card" style="margin:0 16px 16px;padding:16px">
+      <div class="card-title">📋 各级别 × 类型 明细统计</div>
+      <div class="table-wrapper" style="margin-top:10px">
+        <table class="data-table">
+          <thead><tr><th>获奖级别</th><th>个人</th><th>集体</th><th>合计</th></tr></thead>
+          <tbody>
+            ${AWARD_LEVELS.map(l => `<tr><td>${l}</td><td>${cross[l]['个人']}</td><td>${cross[l]['集体']}</td><td style="font-weight:700">${cross[l]['个人'] + cross[l]['集体']}</td></tr>`).join('')}
+            <tr style="font-weight:700;background:var(--bg-light)"><td>合计</td><td>${typeCounts['个人']}</td><td>${typeCounts['集体']}</td><td>${awards.length}</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    ${renderAwardTopList(awards)}
+  `;
+  // 绘制图表
+  if (state.charts.awardLevel) { state.charts.awardLevel.destroy(); state.charts.awardLevel = null; }
+  if (state.charts.awardType) { state.charts.awardType.destroy(); state.charts.awardType = null; }
+  const levelCtx = document.getElementById('awardLevelChart');
+  if (levelCtx) state.charts.awardLevel = new Chart(levelCtx.getContext('2d'), {
+    type: 'bar',
+    data: { labels: AWARD_LEVELS, datasets: [{ label: '获奖数量', data: AWARD_LEVELS.map(l => levelCounts[l]), backgroundColor: ['#E53E3E','#DD6B20','#3182CE','#38A169'] }] },
+    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, ticks: { precision: 0 } } } }
+  });
+  const typeCtx = document.getElementById('awardTypeChart');
+  if (typeCtx) state.charts.awardType = new Chart(typeCtx.getContext('2d'), {
+    type: 'doughnut',
+    data: { labels: ['个人', '集体'], datasets: [{ data: [typeCounts['个人'], typeCounts['集体']], backgroundColor: ['#805AD5','#00B5AD'] }] },
+    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom' } } }
+  });
+}
+
+// 获奖最多的学生 Top10
+function renderAwardTopList(awards) {
+  const byStudent = {};
+  awards.forEach(a => {
+    if (!a.studentId) return;
+    if (!byStudent[a.studentId]) byStudent[a.studentId] = { name: a.studentName || '', count: 0, top: '' };
+    byStudent[a.studentId].count++;
+    const lvIdx = AWARD_LEVELS.indexOf(a.awardLevel);
+    if (lvIdx >= 0 && (!byStudent[a.studentId].top || lvIdx < AWARD_LEVELS.indexOf(byStudent[a.studentId].top))) byStudent[a.studentId].top = a.awardLevel;
+  });
+  const top = Object.entries(byStudent).map(([sid, v]) => ({ sid, ...v })).sort((a, b) => b.count - a.count).slice(0, 10);
+  if (top.length === 0) return '';
+  return `
+    <div class="card" style="margin:0 16px 16px;padding:16px">
+      <div class="card-title">🏆 获奖数量 Top10 学生</div>
+      <div class="table-wrapper" style="margin-top:10px">
+        <table class="data-table">
+          <thead><tr><th>排名</th><th>姓名</th><th>获奖次数</th><th>最高级别</th></tr></thead>
+          <tbody>
+            ${top.map((t, i) => `<tr class="row-clickable" title="点击查看 ${t.name} 详情" onclick="showStudentDetail(${t.sid})"><td><span class="tag ${i < 3 ? 'tag-red' : 'tag-blue'}">${i + 1}</span></td><td>${t.name}</td><td style="font-weight:700">${t.count}</td><td>${t.top || '-'}</td></tr>`).join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
+}
+
+// 获奖明细列表（可按等级/类型/学年/专业筛选）
+function renderAwardList() {
+  const container = document.getElementById('awardTabContent');
+  const awards = state.awards || [];
+  if (awards.length === 0) {
+    container.innerHTML = '<div class="empty-state"><div class="empty-icon">📋</div><div class="empty-text">暂无获奖数据</div></div>';
+    return;
+  }
+  const years = [...new Set(awards.map(a => a.academicYear).filter(Boolean))].sort().reverse();
+  const majors = [...new Set(awards.map(a => a.major).filter(Boolean))].sort();
+  container.innerHTML = `
+    <div class="filter-bar" style="margin:16px">
+      <select class="select" id="awardFYear" onchange="updateAwardList()"><option value="">全部学年</option>${years.map(y => `<option value="${y}">${y}</option>`).join('')}</select>
+      <select class="select" id="awardFLevel" onchange="updateAwardList()"><option value="">全部级别</option>${AWARD_LEVELS.map(l => `<option value="${l}">${l}</option>`).join('')}</select>
+      <select class="select" id="awardFType" onchange="updateAwardList()"><option value="">全部类型</option>${AWARD_TYPES.map(t => `<option value="${t}">${t}</option>`).join('')}</select>
+      <select class="select" id="awardFMajor" onchange="updateAwardList()"><option value="">全部专业</option>${majors.map(m => `<option value="${m}">${m}</option>`).join('')}</select>
+      <input type="text" class="input" id="awardFSearch" placeholder="🔍 姓名/奖项名称…" oninput="updateAwardList()" style="min-width:160px" />
+    </div>
+    <div class="table-wrapper" style="margin:0 16px 16px">
+      <table class="data-table">
+        <thead><tr><th>学年</th><th>姓名</th><th>专业</th><th>获奖级别</th><th>类型</th><th>奖项名称</th><th>获奖时间</th><th>备注</th><th></th></tr></thead>
+        <tbody id="awardListBody"></tbody>
+      </table>
+    </div>
+  `;
+  updateAwardList();
+}
+
+function updateAwardList() {
+  const body = document.getElementById('awardListBody');
+  if (!body) return;
+  const fYear = document.getElementById('awardFYear')?.value || '';
+  const fLevel = document.getElementById('awardFLevel')?.value || '';
+  const fType = document.getElementById('awardFType')?.value || '';
+  const fMajor = document.getElementById('awardFMajor')?.value || '';
+  const kw = (document.getElementById('awardFSearch')?.value || '').trim().toLowerCase();
+  let rows = (state.awards || []).filter(a => {
+    if (fYear && a.academicYear !== fYear) return false;
+    if (fLevel && a.awardLevel !== fLevel) return false;
+    if (fType && a.awardType !== fType) return false;
+    if (fMajor && (a.major || '') !== fMajor) return false;
+    if (kw && !((a.studentName || '').toLowerCase().includes(kw) || (a.awardName || '').toLowerCase().includes(kw))) return false;
+    return true;
+  });
+  rows.sort((a, b) => (b.academicYear || '').localeCompare(a.academicYear || '') || AWARD_LEVELS.indexOf(a.awardLevel) - AWARD_LEVELS.indexOf(b.awardLevel) || (a.awardDate || '').localeCompare(b.awardDate || ''));
+  const lvTag = { '国家级': 'tag-red', '省部级': 'tag-orange', '校级': 'tag-blue', '院级': 'tag-green' };
+  body.innerHTML = rows.map(a => `
+    <tr>
+      <td>${a.academicYear || '-'}</td>
+      <td>${a.studentId ? `<a href="javascript:void(0)" onclick="showStudentDetail(${a.studentId})" style="color:var(--primary)">${a.studentName || '-'}</a>` : (a.studentName || '-')}</td>
+      <td>${a.major || '-'}</td>
+      <td><span class="tag ${lvTag[a.awardLevel] || 'tag-blue'}">${a.awardLevel || '-'}</span></td>
+      <td>${a.awardType || '-'}</td>
+      <td>${a.awardName || '-'}</td>
+      <td>${a.awardDate || '-'}</td>
+      <td>${a.remark || '-'}</td>
+      <td><button class="btn btn-sm btn-outline" onclick="deleteAward(${a.id})">删</button></td>
+    </tr>
+  `).join('') || '<tr><td colspan="9"><div class="empty-state"><div class="empty-text">无符合条件的记录</div></div></td></tr>';
+}
+
+async function deleteAward(id) {
+  if (!confirm('确认删除这条获奖记录？')) return;
+  await dbDelete('awards', id);
+  state.awards = await dbGetAll('awards');
+  renderAwardList();
+  showToast('已删除', 'success');
 }
 
 // ---------- 生涯规划 ----------
