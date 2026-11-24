@@ -1021,6 +1021,8 @@ function renderStudentList(container) {
           <button class="btn btn-outline" onclick="showFieldManager()">⚙️ 调整字段</button>
           <button class="btn btn-outline" onclick="exportStudentsList()">📤 导出全部</button>
           <button class="btn btn-outline" onclick="exportSelectedStudents()" id="exportSelectedBtn" style="display:none">📤 导出选中</button>
+          <button class="btn btn-outline" onclick="editSelectedStudent()" id="editSelectedBtn" style="display:none">✏️ 编辑选中</button>
+          <button class="btn btn-danger" onclick="deleteSelectedStudents()" id="deleteSelectedBtn" style="display:none">🗑️ 删除选中</button>
           <button class="btn btn-outline" onclick="fixStudentData()" title="合并重复学号/姓名的数据">🔧 修复重复</button>
         </div>
         <div>
@@ -1044,13 +1046,15 @@ function renderStudentList(container) {
               <th style="width:36px"><input type="checkbox" id="selectAllCheckbox" onchange="toggleSelectAll(this)"></th>
               <th style="width:48px">序号</th>
               ${columns.map(c => `<th>${getFieldDisplayName(c)}</th>`).join('')}
-              <th>操作</th>
             </tr>
           </thead>
           <tbody id="studentTableBody"></tbody>
         </table>
       </div>
       <div id="studentPaginationBottom" class="pagination pagination-left"></div>
+      <datalist id="careerGoalSuggestions">
+        ${[...new Set(['暂未规划', '考研', '考公', '就业求职', '出国留学', ...students.map(s => String(s.careerGoal || '').trim()).filter(Boolean)])].map(v => `<option value="${escapeHtml(v)}"></option>`).join('')}
+      </datalist>
     </div>
   `;
 
@@ -1105,7 +1109,7 @@ function renderStudentTable(students) {
   const totalPages = Math.ceil(students.length / state.pageSize);
 
   if (students.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="${columns.length + 3}"><div class="empty-state">
+    tbody.innerHTML = `<tr><td colspan="${columns.length + 2}"><div class="empty-state">
       <div class="empty-icon">📋</div>
       <div class="empty-text">暂无学生数据，请点击「导入Excel」或「手动添加」</div>
     </div></td></tr>`;
@@ -1117,11 +1121,7 @@ function renderStudentTable(students) {
       <tr class="row-clickable">
         <td onclick="event.stopPropagation()"><input type="checkbox" class="row-checkbox" data-id="${s.id}" onchange="toggleSelectStudent(${s.id}, this)" ${checked}></td>
         <td class="row-seq">${seq}</td>
-        ${columns.map(c => `<td onclick="showStudentDetail(${s.id})">${renderCellValue(c, s[c])}</td>`).join('')}
-        <td onclick="event.stopPropagation()">
-          <button class="btn btn-sm btn-outline" onclick="showEditStudentForm(${s.id})">编辑</button>
-          <button class="btn btn-sm btn-danger" onclick="deleteStudentConfirm(${s.id})">删除</button>
-        </td>
+        ${columns.map(c => `<td onclick="${c === 'careerGoal' ? 'event.stopPropagation()' : `showStudentDetail(${s.id})`}">${c === 'careerGoal' ? renderCareerGoalCell(s) : renderCellValue(c, s[c])}</td>`).join('')}
       </tr>`;
     }).join('');
   }
@@ -1192,6 +1192,55 @@ function renderCellValue(fieldKey, value) {
   }
   if (fieldKey === 'careerGoal') return `<span class="tag tag-blue">${value}</span>`;
   return escapeHtml(value);
+}
+
+// 生涯规划目标：单元格内即时编辑（点击变输入框，回车/失焦保存，Esc 取消）
+function renderCareerGoalCell(s) {
+  const val = String(s.careerGoal || '').trim() || '暂未规划';
+  return `<span class="career-goal-cell" data-id="${s.id}" title="点击编辑生涯规划目标" onclick="startEditCareerGoal(${s.id}, this)">
+    <span class="tag tag-blue" style="cursor:text;border-bottom:1px dashed currentColor">${escapeHtml(val)} ✎</span>
+  </span>`;
+}
+
+function startEditCareerGoal(id, spanEl) {
+  const s = state.students.find(x => x.id === id);
+  if (!s) return;
+  const val = String(s.careerGoal || '').trim();
+  spanEl.classList.add('editing');
+  spanEl.innerHTML = `<input type="text" class="input career-goal-input" value="${escapeHtml(val)}" list="careerGoalSuggestions"
+    style="min-width:120px;width:150px;padding:3px 8px;font-size:13px"
+    onkeydown="if(event.key==='Enter'){event.preventDefault();saveCareerGoal(${id}, this)}else if(event.key==='Escape'){cancelEditCareerGoal(${id})}"
+    onblur="saveCareerGoal(${id}, this)">`;
+  const inp = spanEl.querySelector('input');
+  if (inp) { inp.focus(); inp.select(); }
+}
+
+async function saveCareerGoal(id, inputEl) {
+  const spanEl = inputEl?.closest('.career-goal-cell');
+  if (!spanEl || spanEl.dataset.saving === '1') return;
+  const newVal = inputEl.value.trim();
+  const s = state.students.find(x => x.id === id);
+  if (!s) return;
+  const oldVal = String(s.careerGoal || '').trim();
+  if (newVal === oldVal) { cancelEditCareerGoal(id); return; }
+  spanEl.dataset.saving = '1';
+  s.careerGoal = newVal;
+  s.updatedAt = Date.now();
+  await dbPut('students', s);
+  const idx = state.students.findIndex(x => x.id === id);
+  if (idx >= 0) state.students[idx] = s;
+  showToast('生涯规划目标已更新', 'success');
+  cancelEditCareerGoal(id);
+}
+
+function cancelEditCareerGoal(id) {
+  const spanEl = document.querySelector(`.career-goal-cell[data-id="${id}"]`);
+  if (!spanEl) return;
+  const s = state.students.find(x => x.id === id);
+  if (!s) return;
+  const val = String(s.careerGoal || '').trim() || '暂未规划';
+  spanEl.classList.remove('editing');
+  spanEl.innerHTML = `<span class="tag tag-blue" style="cursor:text;border-bottom:1px dashed currentColor">${escapeHtml(val)} ✎</span>`;
 }
 
 // ========== 学生统计面板 ==========
@@ -1985,15 +2034,68 @@ function toggleSelectStudent(id, checkbox) {
   }
 }
 
-// 更新导出选中按钮显示状态
+// 更新选中相关按钮（导出/编辑/删除）显示状态
 function updateExportSelectedBtn() {
+  const n = state.selectedStudentIds.size;
   const btn = document.getElementById('exportSelectedBtn');
-  if (!btn) return;
-  if (state.selectedStudentIds.size > 0) {
-    btn.style.display = '';
-    btn.textContent = `📤 导出选中(${state.selectedStudentIds.size})`;
-  } else {
-    btn.style.display = 'none';
+  if (btn) {
+    btn.style.display = n > 0 ? '' : 'none';
+    btn.textContent = `📤 导出选中(${n})`;
+  }
+  const editBtn = document.getElementById('editSelectedBtn');
+  if (editBtn) {
+    editBtn.style.display = n > 0 ? '' : 'none';
+    editBtn.textContent = n > 1 ? `✏️ 编辑选中(请只勾1人)` : `✏️ 编辑选中`;
+  }
+  const delBtn = document.getElementById('deleteSelectedBtn');
+  if (delBtn) {
+    delBtn.style.display = n > 0 ? '' : 'none';
+    delBtn.textContent = `🗑️ 删除选中(${n})`;
+  }
+}
+
+// 编辑选中学生：选中一人时打开编辑表单
+function editSelectedStudent() {
+  const ids = [...state.selectedStudentIds];
+  if (ids.length === 0) { showToast('请先勾选要编辑的学生', 'error'); return; }
+  if (ids.length > 1) { showToast('编辑请只勾选一名学生（当前选中 ' + ids.length + ' 人）', 'warning'); return; }
+  showEditStudentForm(ids[0]);
+}
+
+// 批量删除选中学生（含关联成绩/综测/获奖数据）
+function deleteSelectedStudents() {
+  const ids = [...state.selectedStudentIds];
+  if (ids.length === 0) { showToast('请先勾选要删除的学生', 'error'); return; }
+  const names = ids.map(id => (state.students.find(s => s.id === id) || {}).name).filter(Boolean);
+  const preview = names.slice(0, 6).join('、') + (names.length > 6 ? ' 等' : '');
+  showModal('确认批量删除', `<p style="font-size:14px;color:var(--text-body)">确定要删除选中的 <strong>${ids.length}</strong> 名学生吗？<br><span style="color:var(--text-muted)">${escapeHtml(preview)}</span><br>删除后这些学生的所有成绩、综测、获奖数据也将一并删除，此操作不可撤销。</p>`,
+    `<button class="btn btn-outline" onclick="closeModal()">取消</button><button class="btn btn-danger" onclick="confirmDeleteSelected()">确认删除 ${ids.length} 人</button>`);
+}
+
+async function confirmDeleteSelected() {
+  const ids = [...state.selectedStudentIds];
+  showLoading('正在删除...');
+  try {
+    for (const id of ids) {
+      const sid = String(id);
+      const grades = await dbGetByIndex('grades', 'studentId', sid);
+      const assessments = await dbGetByIndex('assessments', 'studentId', sid);
+      let awards = [];
+      try { awards = await dbGetByIndex('awards', 'studentId', sid); } catch (e) { /* 兼容旧库无 awards 索引 */ }
+      for (const g of grades) await dbDelete('grades', g.id);
+      for (const a of assessments) await dbDelete('assessments', a.id);
+      for (const w of awards) await dbDelete('awards', w.id);
+      await dbDelete('students', id);
+    }
+    state.selectedStudentIds.clear();
+    closeModal();
+    hideLoading();
+    showToast(`已删除 ${ids.length} 名学生`, 'success');
+    state.students = await dbGetAll('students');
+    navigateTo('students');
+  } catch (err) {
+    hideLoading();
+    showToast('删除失败：' + err.message, 'error');
   }
 }
 
@@ -2362,7 +2464,6 @@ MODULE_RENDERERS.grades = async function(container) {
       <div class="tabs" id="gradeTabs">
         <button class="tab active" onclick="switchGradeTab('ranking', this)">成绩排名</button>
         <button class="tab" onclick="switchGradeTab('trend', this)">趋势分析</button>
-        <button class="tab" onclick="switchGradeTab('compare', this)">学业vs综测对比</button>
       </div>
       <div id="gradeTabContent"></div>
     </div>
@@ -2375,7 +2476,6 @@ function switchGradeTab(tab, btn) {
   btn.classList.add('active');
   if (tab === 'ranking') renderGradeRanking();
   else if (tab === 'trend') renderGradeTrend();
-  else if (tab === 'compare') renderGradeCompare();
 }
 
 function triggerGradeRankImport() {
@@ -2637,32 +2737,6 @@ function updateGradeTrend() {
   renderGradeCompareInto('trendCompareBody', 'trendCompareChart', 'trendCompare', sid);
 }
 
-function renderGradeCompare() {
-  const container = document.getElementById('gradeTabContent');
-  if (state.students.length === 0) {
-    container.innerHTML = '<div class="empty-state"><div class="empty-text">暂无学生数据</div></div>';
-    return;
-  }
-  container.innerHTML = `
-    <div class="filter-bar">
-      <input type="text" class="input" id="compareSearch" placeholder="🔍 输入姓名或学号搜索…" oninput="filterCompareStudents()" style="min-width:200px" />
-      <select class="select" id="compareStudent" onchange="updateGradeCompare()"></select>
-      <button class="btn btn-outline" onclick="clearCompareSearch()">清除</button>
-    </div>
-    <div style="font-size:12px;color:var(--text-muted);line-height:1.7;margin:-4px 0 12px;padding:10px 12px;background:rgba(30,78,140,.05);border-radius:8px">
-      📌 <strong>并列口径</strong>：以「学期」为单位横向并列——学业排名取该学期排名，综测排名取对应学年的学年排名（同一学年的两个学期共用该学年综测值）。排名优先用导入表中的值；无导入排名时，按<strong>同年级同专业</strong>内的分数计算。位次差异 = 学业排名 − 综测排名（正数表示综测名次更靠前）。
-    </div>
-    <div class="chart-container"><canvas id="compareChart"></canvas></div>
-    <div class="table-wrapper" style="margin-top:12px">
-      <table class="data-table">
-        <thead>${compareTableHead()}</thead>
-        <tbody id="compareBody"></tbody>
-      </table>
-    </div>
-  `;
-  filterCompareStudents();
-}
-
 // 从学期标签提取学年：2024-2025-1 → 2024-2025
 function semesterToAcademicYear(semester) {
   const m = String(semester || '').match(/^(\d{4}-\d{4})/);
@@ -2799,40 +2873,9 @@ function renderGradeCompareInto(bodyId, canvasId, chartKey, sid) {
   }
 }
 
-// 独立对比页调用
-function updateGradeCompare() {
-  const sid = document.getElementById('compareStudent').value;
-  renderGradeCompareInto('compareBody', 'compareChart', 'compare', sid);
-}
-
-// 趋势页并列对比区块的表头（供两处复用）
+// 趋势页并列对比区块的表头
 function compareTableHead() {
   return '<tr><th>学期</th><th>学年</th><th>学业总分</th><th>学业排名</th><th>综测总分</th><th>综测排名</th><th>位次差异</th></tr>';
-}
-
-// 学业vs综测对比：根据搜索关键词过滤学生下拉列表（复用 renderTrendStudentOptions）
-function filterCompareStudents() {
-  const input = document.getElementById('compareSearch');
-  const sel = document.getElementById('compareStudent');
-  if (!input || !sel) return;
-  const kw = input.value;
-  sel.innerHTML = renderTrendStudentOptions(kw);
-  if (sel.options.length > 0) {
-    sel.selectedIndex = 0;
-    updateGradeCompare();
-  } else {
-    const body = document.getElementById('compareBody');
-    if (body) body.innerHTML = '<tr><td colspan="6">未找到匹配的学生</td></tr>';
-    const ctx = document.getElementById('compareChart');
-    if (ctx && state.charts.compare) { state.charts.compare.destroy(); state.charts.compare = null; }
-  }
-}
-
-function clearCompareSearch() {
-  const input = document.getElementById('compareSearch');
-  if (input) input.value = '';
-  filterCompareStudents();
-  if (input) input.focus();
 }
 
 async function handleGradeExcelImport(file) {
@@ -4161,32 +4204,32 @@ MODULE_RENDERERS.career = async function(container) {
 const COMPETITIONS = {
   '创新创业类': [
     { name: '中国国际大学生创新大赛（原互联网+）', url: 'https://cy.ncss.cn/', desc: '全国最大规模创新创业赛事' },
-    { name: '"挑战杯"全国大学生课外学术科技作品竞赛', url: 'https://www.tiaozhan.com/', desc: '大学生学术科技顶级赛事' },
+    { name: '"挑战杯"全国大学生课外学术科技作品竞赛', url: 'https://www.tiaozhanbei.net/', desc: '大学生学术科技顶级赛事' },
     { name: '全国大学生电子商务"创新、创意及创业"挑战赛（三创赛）', url: 'http://www.3chuang.net/', desc: '电子商务领域创新竞赛' },
-    { name: '"学创杯"全国大学生创业综合模拟大赛', url: 'http://www.bingowit.com/', desc: '创业模拟实战竞赛' },
-    { name: '"创青春"全国大学生创业大赛', url: 'https://www.chuangqingchun.net/', desc: '共青团中央主办创业赛事' },
+    { name: '"学创杯"全国大学生创业综合模拟大赛', url: 'http://www.xcbds.com/', desc: '创业模拟实战竞赛' },
+    { name: '中国青年创青春大赛（原创青春）', url: 'https://cqc.yeeol.com/', desc: '共青团中央主办创业赛事' },
     { name: 'iCAN大学生创新创业大赛', url: 'http://www.g-ican.com/', desc: '原创微纳领域创新赛事' }
   ],
   '职业规划与就业类': [
-    { name: '全国大学生职业规划大赛', url: 'https://www.ncss.cn/', desc: '大学生职业规划国家级赛事' },
-    { name: '全国大学生市场调查与分析大赛（正大杯）', url: 'http://www.china-cssa.org/', desc: '市场调查研究分析竞赛' }
+    { name: '全国大学生职业规划大赛', url: 'https://zgs.chsi.com.cn/', desc: '大学生职业规划国家级赛事' },
+    { name: '全国大学生市场调查与分析大赛（正大杯）', url: 'http://www.china-cssc.org/', desc: '市场调查研究分析竞赛' }
   ],
   '社会实践与志愿服务类': [
     { name: '全国大中专学生"三下乡"社会实践', url: 'https://sxx.youth.cn/', desc: '暑期文化科技卫生三下乡' },
-    { name: '"返家乡"社会实践活动', url: 'https://fjx.youth.cn/', desc: '寒假返乡社会实践' },
+    { name: '"返家乡"社会实践活动', url: 'https://sxx.youth.cn/', desc: '寒假返乡社会实践（与三下乡同一官网）' },
     { name: '大学生志愿服务西部计划', url: 'https://xibu.youth.cn/', desc: '西部志愿服务项目' },
-    { name: '中国青年志愿服务项目大赛', url: 'https://www.chinavolunteer.mca.gov.cn/', desc: '志愿服务领域赛事' }
+    { name: '中国青年志愿服务项目大赛', url: 'https://zhijh.youth.cn/', desc: '志愿服务领域赛事' }
   ],
   '文化艺术类': [
-    { name: '中华经典诵写讲大赛', url: 'https://www.jingdiansxw.cn/', desc: '经典诵读书法大赛' },
-    { name: '全国大学生艺术展演', url: 'http://www.moe.gov.cn/', desc: '大学生艺术教育成果展' },
+    { name: '中华经典诵写讲大赛', url: 'https://jdsxj.eduyun.cn/', desc: '经典诵读书法大赛（教育部唯一官网）' },
+    { name: '全国大学生艺术展演', url: 'http://www.moe.gov.cn/', desc: '大学生艺术教育成果展（教育部官网入口）' },
     { name: '外研社·国才杯全国英语大赛', url: 'https://uchallenge.unipus.cn/', desc: '英语演讲写作阅读大赛' }
   ],
   '学术科技类': [
     { name: '全国大学生数学建模竞赛', url: 'http://www.mcm.edu.cn/', desc: '数学建模顶级赛事' },
-    { name: '全国大学生市场调查与分析大赛', url: 'http://www.china-cssa.org/', desc: '市场调研学术竞赛' },
-    { name: '全国大学生广告艺术大赛（大广赛）', url: 'http://www.sun-aea.net/', desc: '广告创意设计赛事' },
-    { name: '全国大学生节能减排社会实践与科技竞赛', url: 'http://www.jnjp.org.cn/', desc: '节能减排创新竞赛' }
+    { name: '全国大学生市场调查与分析大赛', url: 'http://www.china-cssc.org/', desc: '市场调研学术竞赛' },
+    { name: '全国大学生广告艺术大赛（大广赛）', url: 'https://www.sun-ada.net/', desc: '广告创意设计赛事' },
+    { name: '全国大学生节能减排社会实践与科技竞赛', url: 'https://www.jienengjianpai.org/', desc: '节能减排创新竞赛' }
   ],
   '思政与理论类': [
     { name: '全国高校学生讲思政课公开课展示活动', url: 'http://www.moe.gov.cn/', desc: '大学生讲思政课比赛' },
