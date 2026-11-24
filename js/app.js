@@ -2566,8 +2566,9 @@ function renderGradeTrend() {
       </div>
     </div>
     <div class="filter-bar">
-      <input type="text" class="input" id="gradeTrendSearch" placeholder="🔍 输入姓名或学号搜索…" oninput="filterGradeTrendStudents()" style="min-width:200px" />
-      <select class="select" id="gradeTrendStudent" onchange="updateGradeTrend()"></select>
+      <input type="text" class="input" id="gradeTrendSearch" placeholder="🔍 输入姓名或学号搜索…" oninput="filterGradeTrendStudents()" style="min-width:180px" />
+      ${trendFilterSelects('grade')}
+      <select class="select" id="gradeTrendStudent" onchange="updateGradeTrend()" style="min-width:200px"></select>
       <button class="btn btn-outline" onclick="clearGradeTrendSearch()">清除</button>
     </div>
     <div class="chart-container"><canvas id="gradeTrendChart"></canvas></div>
@@ -2593,10 +2594,44 @@ function renderGradeTrend() {
   filterGradeTrendStudents();
 }
 
-// 根据搜索关键词过滤趋势分析的学生下拉列表
-function renderTrendStudentOptions(keyword) {
+// 趋势分析搜索栏：输入搜索 + 年级/专业/学历层次筛选（学业与综测共用）
+function trendFilterSelects(prefix) {
+  const grades = [...new Set(state.students.map(s => String(s.year || '').trim()).filter(Boolean))].sort().reverse();
+  const majors = [...new Set(state.students.map(s => String(s.major || '').trim()).filter(Boolean))].sort();
+  const levels = ['本科', '硕士研究生', '博士研究生'];
+  return `
+    <select class="select" id="${prefix}TrendLevelFilter" onchange="${prefix === 'grade' ? 'filterGradeTrendStudents' : 'filterAssessTrendStudents'}()" title="学历层次">
+      <option value="">全部学历层次</option>
+      ${levels.map(l => `<option value="${l}">${l}</option>`).join('')}
+    </select>
+    <select class="select" id="${prefix}TrendYearFilter" onchange="${prefix === 'grade' ? 'filterGradeTrendStudents' : 'filterAssessTrendStudents'}()" title="年级">
+      <option value="">全部年级</option>
+      ${grades.map(g => `<option value="${escapeHtml(g)}">${escapeHtml(g)}</option>`).join('')}
+    </select>
+    <select class="select" id="${prefix}TrendMajorFilter" onchange="${prefix === 'grade' ? 'filterGradeTrendStudents' : 'filterAssessTrendStudents'}()" title="专业">
+      <option value="">全部专业</option>
+      ${majors.map(m => `<option value="${escapeHtml(m)}">${escapeHtml(m)}</option>`).join('')}
+    </select>
+  `;
+}
+
+// 判断学生是否符合趋势页的年级/专业/学历层次筛选条件
+function matchTrendFilters(s, prefix) {
+  const level = document.getElementById(`${prefix}TrendLevelFilter`)?.value || '';
+  const year = document.getElementById(`${prefix}TrendYearFilter`)?.value || '';
+  const major = document.getElementById(`${prefix}TrendMajorFilter`)?.value || '';
+  if (level && String(s.gradeLevel || '').trim() !== level) return false;
+  if (year && String(s.year || '').trim() !== year) return false;
+  if (major && String(s.major || '').trim() !== major) return false;
+  return true;
+}
+
+// 根据搜索关键词+筛选条件过滤趋势分析的学生下拉列表
+function renderTrendStudentOptions(keyword, prefix) {
+  prefix = prefix || 'grade';
   const kw = (keyword || '').trim().toLowerCase();
   const list = state.students.filter(s => {
+    if (!matchTrendFilters(s, prefix)) return false;
     if (!kw) return true;
     return String(s.studentId).toLowerCase().includes(kw) || String(s.name).toLowerCase().includes(kw);
   }).sort((a, b) => (a.className || '').localeCompare(b.className || ''));
@@ -2608,7 +2643,7 @@ function filterGradeTrendStudents() {
   const sel = document.getElementById('gradeTrendStudent');
   if (!input || !sel) return;
   const kw = input.value;
-  sel.innerHTML = renderTrendStudentOptions(kw);
+  sel.innerHTML = renderTrendStudentOptions(kw, 'grade');
   if (sel.options.length > 0) {
     sel.selectedIndex = 0;
     updateGradeTrend();
@@ -2627,6 +2662,10 @@ function filterGradeTrendStudents() {
 function clearGradeTrendSearch() {
   const input = document.getElementById('gradeTrendSearch');
   if (input) input.value = '';
+  ['gradeTrendLevelFilter', 'gradeTrendYearFilter', 'gradeTrendMajorFilter'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.value = '';
+  });
   filterGradeTrendStudents();
   if (input) input.focus();
 }
@@ -2689,6 +2728,11 @@ function jumpToTrend(studentId) {
   if (!input || !sel) return;
   const st = (state.students || []).find(s => String(s.id) === String(studentId));
   if (!st) return;
+  // 重置筛选条件，避免目标学生被隐藏
+  ['gradeTrendLevelFilter', 'gradeTrendYearFilter', 'gradeTrendMajorFilter'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.value = '';
+  });
   // 用学号精确搜索（学号唯一），自动选中该生并刷新趋势图
   input.value = st.studentId || st.name || '';
   filterGradeTrendStudents();
@@ -3167,8 +3211,9 @@ function renderAssessTrend() {
       </div>
     </div>
     <div class="filter-bar">
-      <input type="text" class="input" id="assessTrendSearch" placeholder="🔍 输入姓名或学号搜索…" oninput="filterAssessTrendStudents()" style="min-width:200px" />
-      <select class="select" id="assessTrendStudent" onchange="updateAssessTrend()"></select>
+      <input type="text" class="input" id="assessTrendSearch" placeholder="🔍 输入姓名或学号搜索…" oninput="filterAssessTrendStudents()" style="min-width:180px" />
+      ${trendFilterSelects('assess')}
+      <select class="select" id="assessTrendStudent" onchange="updateAssessTrend()" style="min-width:200px"></select>
       <button class="btn btn-outline" onclick="clearAssessTrendSearch()">清除</button>
     </div>
     <div class="chart-container"><canvas id="assessTrendChart"></canvas></div>
@@ -3254,12 +3299,13 @@ function renderAssessOverview() {
   </table></div>`;
 }
 
-// 根据搜索关键词过滤综测趋势学生下拉（学生库中有综测记录的学生）
+// 根据搜索关键词+筛选条件过滤综测趋势学生下拉（学生库中有综测记录的学生）
 function renderAssessTrendStudentOptions(keyword) {
   const kw = (keyword || '').trim().toLowerCase();
   const withData = new Set(state.assessments.map(a => String(a.studentId)));
   const list = state.students.filter(s => {
     if (!withData.has(String(s.id))) return false;
+    if (!matchTrendFilters(s, 'assess')) return false;
     if (!kw) return true;
     return String(s.studentId).toLowerCase().includes(kw) || String(s.name).toLowerCase().includes(kw);
   }).sort((a, b) => (a.className || '').localeCompare(b.className || ''));
@@ -3286,6 +3332,10 @@ function filterAssessTrendStudents() {
 function clearAssessTrendSearch() {
   const input = document.getElementById('assessTrendSearch');
   if (input) input.value = '';
+  ['assessTrendLevelFilter', 'assessTrendYearFilter', 'assessTrendMajorFilter'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.value = '';
+  });
   filterAssessTrendStudents();
   if (input) input.focus();
 }
@@ -3297,6 +3347,10 @@ function jumpAssessTrend(studentId) {
   if (!input || !sel) return;
   const st = (state.students || []).find(s => String(s.id) === String(studentId));
   if (!st) return;
+  ['assessTrendLevelFilter', 'assessTrendYearFilter', 'assessTrendMajorFilter'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.value = '';
+  });
   input.value = st.studentId || st.name || '';
   filterAssessTrendStudents();
   if (sel.value !== String(studentId)) sel.value = String(studentId);
@@ -4114,56 +4168,119 @@ async function deleteAward(id) {
 }
 
 // ---------- 生涯规划 ----------
+const CAREER_GOALS = ['考研', '考公', '就业求职', '出国留学', '暂未规划'];
+const CAREER_GOAL_COLORS = ['#1E4E8C', '#38A169', '#D69E2E', '#E53E3E', '#718096'];
+const CAREER_LEVELS = ['本科', '硕士研究生', '博士研究生'];
+
 MODULE_RENDERERS.career = async function(container) {
   state.students = await dbGetAll('students');
-  const goals = { '考研': 0, '考公': 0, '就业求职': 0, '出国留学': 0, '暂未规划': 0 };
-  const classGoals = {};
+  if (!state.careerLevel) state.careerLevel = ''; // 空=全部
+  const levels = [...new Set([
+    ...CAREER_LEVELS,
+    ...state.students.map(s => String(s.gradeLevel || '').trim()).filter(Boolean)
+  ])];
+  container.innerHTML = `
+    <div class="card">
+      <div class="card-header">
+        <div>
+          <div class="card-title">🎯 生涯规划大数据</div>
+          <div class="card-subtitle">按学历层次分开统计 · 本科 / 硕士研究生 / 博士研究生</div>
+        </div>
+      </div>
+      <div class="tabs" id="careerLevelTabs">
+        <button class="tab ${state.careerLevel === '' ? 'active' : ''}" onclick="switchCareerLevel('', this)">全部层次</button>
+        ${levels.map(l => `<button class="tab ${state.careerLevel === l ? 'active' : ''}" onclick="switchCareerLevel('${escapeHtml(l)}', this)">${escapeHtml(l)}</button>`).join('')}
+      </div>
+    </div>
+    <div id="careerContent"></div>
+  `;
+  renderCareerByLevel();
+};
 
-  state.students.forEach(s => {
-    const goal = s.careerGoal || '暂未规划';
-    if (goals.hasOwnProperty(goal)) goals[goal]++;
-    const cn = s.className || '未分班';
-    if (!classGoals[cn]) classGoals[cn] = { '考研': 0, '考公': 0, '就业求职': 0, '出国留学': 0, '暂未规划': 0 };
-    if (classGoals[cn].hasOwnProperty(goal)) classGoals[cn][goal]++;
+// 切换学历层次（重新渲染统计内容）
+function switchCareerLevel(level, btn) {
+  state.careerLevel = level;
+  document.querySelectorAll('#careerLevelTabs .tab').forEach(t => t.classList.remove('active'));
+  if (btn) btn.classList.add('active');
+  renderCareerByLevel();
+}
+
+// 按当前选中的学历层次渲染生涯规划全部统计栏目
+function renderCareerByLevel() {
+  const container = document.getElementById('careerContent');
+  if (!container) return;
+  // 销毁旧图表，避免重复 canvas 报错
+  ['careerPie2', 'careerBar', 'careerClassBar', 'careerLevelCompare'].forEach(k => {
+    if (state.charts[k]) { state.charts[k].destroy(); state.charts[k] = null; }
   });
-
-  const total = state.students.length;
+  const level = state.careerLevel || '';
+  const scoped = level ? state.students.filter(s => String(s.gradeLevel || '').trim() === level) : state.students;
+  const goals = {}; CAREER_GOALS.forEach(g => goals[g] = 0);
+  const classGoals = {};
+  scoped.forEach(s => {
+    const goal = CAREER_GOALS.includes(s.careerGoal) ? s.careerGoal : '暂未规划';
+    goals[goal]++;
+    const cn = s.className || '未分班';
+    if (!classGoals[cn]) { classGoals[cn] = {}; CAREER_GOALS.forEach(g => classGoals[cn][g] = 0); }
+    classGoals[cn][goal]++;
+  });
+  const total = scoped.length;
+  const scopeLabel = level || '全部学历层次';
 
   container.innerHTML = `
-    <div class="stat-grid">
-      ${Object.entries(goals).map(([goal, count]) => {
-        const pct = total > 0 ? ((count/total)*100).toFixed(1) : 0;
-        const colors = { '考研':'stat-blue', '考公':'stat-green', '就业求职':'stat-orange', '出国留学':'stat-red', '暂未规划':'stat-orange' };
-        return `<div class="stat-card ${colors[goal]||'stat-blue'}">
-          <div class="stat-value">${count}</div>
-          <div class="stat-label">${goal} (${pct}%)</div>
-        </div>`;
-      }).join('')}
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-header"><div class="card-title">📊 ${escapeHtml(scopeLabel)} · 生涯目标统计</div>
+        <span class="tag tag-blue">${total} 人</span></div>
+      <div class="stat-grid">
+        ${CAREER_GOALS.map(goal => {
+          const count = goals[goal];
+          const pct = total > 0 ? ((count / total) * 100).toFixed(1) : 0;
+          const idx = CAREER_GOALS.indexOf(goal);
+          return `<div class="stat-card ${['stat-blue','stat-green','stat-orange','stat-red','stat-orange'][idx]}">
+            <div class="stat-value">${count}</div>
+            <div class="stat-label">${goal} (${pct}%)</div>
+          </div>`;
+        }).join('')}
+      </div>
     </div>
 
-    <div class="card">
-      <div class="card-header"><div class="card-title">生涯规划总览</div></div>
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-header"><div class="card-title">${escapeHtml(scopeLabel)} · 生涯规划总览</div></div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px">
         <div class="chart-container"><canvas id="careerPie2"></canvas></div>
         <div class="chart-container"><canvas id="careerBar"></canvas></div>
       </div>
     </div>
 
-    <div class="card">
-      <div class="card-header"><div class="card-title">各班级生涯规划分布</div></div>
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-header"><div class="card-title">${escapeHtml(scopeLabel)} · 各班级生涯规划分布</div></div>
       <div class="chart-container"><canvas id="careerClassBar"></canvas></div>
     </div>
 
-    <div class="card">
-      <div class="card-header"><div class="card-title">班级明细</div></div>
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-header"><div class="card-title">${escapeHtml(scopeLabel)} · 班级明细</div></div>
       <div class="table-wrapper">
         <table class="data-table">
-          <thead><tr><th>班级</th><th>考研</th><th>考公</th><th>就业求职</th><th>出国留学</th><th>暂未规划</th><th>合计</th></tr></thead>
+          <thead><tr><th>班级</th>${CAREER_GOALS.map(g => `<th>${g}</th>`).join('')}<th>合计</th></tr></thead>
           <tbody>
-            ${Object.entries(classGoals).map(([cn, goals]) => {
-              const sum = Object.values(goals).reduce((a,b)=>a+b,0);
-              return `<tr><td>${cn}</td>${Object.values(goals).map(g => `<td>${g}</td>`).join('')}<td><strong>${sum}</strong></td></tr>`;
-            }).join('')}
+            ${Object.keys(classGoals).sort().map(cn => {
+              const g = classGoals[cn];
+              const sum = CAREER_GOALS.reduce((a, k) => a + g[k], 0);
+              return `<tr><td>${escapeHtml(cn)}</td>${CAREER_GOALS.map(k => `<td>${g[k]}</td>`).join('')}<td><strong>${sum}</strong></td></tr>`;
+            }).join('') || `<tr><td colspan="${CAREER_GOALS.length + 2}">暂无数据</td></tr>`}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header"><div class="card-title">📈 各学历层次生涯目标对比（全部层次）</div></div>
+      <div class="chart-container"><canvas id="careerLevelCompare"></canvas></div>
+      <div class="table-wrapper" style="margin-top:12px">
+        <table class="data-table">
+          <thead><tr><th>学历层次</th>${CAREER_GOALS.map(g => `<th>${g}</th>`).join('')}<th>合计</th></tr></thead>
+          <tbody>
+            ${levelsTableRows()}
           </tbody>
         </table>
       </div>
@@ -4172,39 +4289,82 @@ MODULE_RENDERERS.career = async function(container) {
 
   // 饼图
   const ctx1 = document.getElementById('careerPie2').getContext('2d');
-  new Chart(ctx1, {
+  state.charts.careerPie2 = new Chart(ctx1, {
     type: 'pie',
     data: {
-      labels: Object.keys(goals),
-      datasets: [{ data: Object.values(goals), backgroundColor: ['#1E4E8C','#38A169','#D69E2E','#E53E3E','#718096'], borderWidth: 2, borderColor: '#fff' }]
+      labels: CAREER_GOALS,
+      datasets: [{ data: CAREER_GOALS.map(g => goals[g]), backgroundColor: CAREER_GOAL_COLORS, borderWidth: 2, borderColor: '#fff' }]
     },
-    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom' } } }
+    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom' }, title: { display: true, text: scopeLabel + ' 生涯目标占比' } } }
   });
 
   // 柱状图
   const ctx2 = document.getElementById('careerBar').getContext('2d');
-  new Chart(ctx2, {
+  state.charts.careerBar = new Chart(ctx2, {
     type: 'bar',
-    data: { labels: Object.keys(goals), datasets: [{ label: '人数', data: Object.values(goals), backgroundColor: '#1E4E8C' }] },
-    options: { responsive: true, maintainAspectRatio: false, plugins: { title: { display: true, text: '生涯目标人数分布' } }, scales: { y: { beginAtZero: true, ticks: { stepSize: 1 } } } }
+    data: { labels: CAREER_GOALS, datasets: [{ label: scopeLabel, data: CAREER_GOALS.map(g => goals[g]), backgroundColor: '#1E4E8C' }] },
+    options: { responsive: true, maintainAspectRatio: false, plugins: { title: { display: true, text: scopeLabel + ' 生涯目标人数分布' } }, scales: { y: { beginAtZero: true, ticks: { stepSize: 1 } } } }
   });
 
   // 班级堆叠柱状图
   const ctx3 = document.getElementById('careerClassBar').getContext('2d');
-  const classNames = Object.keys(classGoals);
-  new Chart(ctx3, {
+  const classNames = Object.keys(classGoals).sort();
+  state.charts.careerClassBar = new Chart(ctx3, {
     type: 'bar',
     data: {
       labels: classNames,
-      datasets: Object.keys(goals).map((goal, i) => ({
+      datasets: CAREER_GOALS.map((goal, i) => ({
         label: goal,
         data: classNames.map(cn => classGoals[cn][goal]),
-        backgroundColor: ['#1E4E8C','#38A169','#D69E2E','#E53E3E','#718096'][i]
+        backgroundColor: CAREER_GOAL_COLORS[i]
       }))
     },
-    options: { responsive: true, maintainAspectRatio: false, scales: { x: { stacked: true }, y: { stacked: true, beginAtZero: true, ticks: { stepSize: 1 } } }, plugins: { title: { display: true, text: '各班级生涯规划堆叠图' } } }
+    options: { responsive: true, maintainAspectRatio: false, scales: { x: { stacked: true }, y: { stacked: true, beginAtZero: true, ticks: { stepSize: 1 } } }, plugins: { title: { display: true, text: scopeLabel + ' 各班级生涯规划堆叠图' } } }
   });
-};
+
+  // 各学历层次对比堆叠柱状图
+  const lvData = careerLevelStats();
+  const lvNames = lvData.map(x => x.level);
+  const ctx4 = document.getElementById('careerLevelCompare').getContext('2d');
+  state.charts.careerLevelCompare = new Chart(ctx4, {
+    type: 'bar',
+    data: {
+      labels: lvNames,
+      datasets: CAREER_GOALS.map((goal, i) => ({
+        label: goal,
+        data: lvData.map(x => x.goals[goal]),
+        backgroundColor: CAREER_GOAL_COLORS[i]
+      }))
+    },
+    options: { responsive: true, maintainAspectRatio: false, scales: { x: { stacked: true }, y: { stacked: true, beginAtZero: true, ticks: { stepSize: 1 } } }, plugins: { title: { display: true, text: '各学历层次生涯目标人数对比' } } }
+  });
+}
+
+// 计算各学历层次的生涯目标统计
+function careerLevelStats() {
+  const levels = [...new Set([
+    ...CAREER_LEVELS,
+    ...state.students.map(s => String(s.gradeLevel || '').trim()).filter(Boolean)
+  ])];
+  return levels.map(level => {
+    const list = state.students.filter(s => String(s.gradeLevel || '').trim() === level);
+    const goals = {}; CAREER_GOALS.forEach(g => goals[g] = 0);
+    list.forEach(s => {
+      const goal = CAREER_GOALS.includes(s.careerGoal) ? s.careerGoal : '暂未规划';
+      goals[goal]++;
+    });
+    return { level, count: list.length, goals };
+  });
+}
+
+// 各学历层次对比表格行
+function levelsTableRows() {
+  const stats = careerLevelStats();
+  return stats.map(x => {
+    const sum = CAREER_GOALS.reduce((a, g) => a + x.goals[g], 0);
+    return `<tr><td>${escapeHtml(x.level)}</td>${CAREER_GOALS.map(g => `<td>${x.goals[g]}</td>`).join('')}<td><strong>${sum}</strong></td></tr>`;
+  }).join('') || `<tr><td colspan="${CAREER_GOALS.length + 2}">暂无数据</td></tr>`;
+}
 
 // ---------- 竞赛指导 ----------
 const COMPETITIONS = {
