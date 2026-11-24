@@ -72,10 +72,47 @@ async function supabaseSignOut() {
   syncState.lastSync = null;
 }
 
-// 获取当前登录用户（从 localStorage 读取 session，不依赖网络）
+// 预热 Supabase：页面一打开就后台唤醒免费版项目 + 建立连接，
+// 让用户填写邮箱密码的几秒内项目已热，点登录时无需再等冷启动
+function warmupSupabase() {
+  if (!supabaseClient || !SUPABASE_CONFIG.url) return;
+  try {
+    fetch(SUPABASE_CONFIG.url + '/auth/v1/health', {
+      headers: { apikey: SUPABASE_CONFIG.anonKey }
+    }).catch(() => {});
+    // 顺带触发 auth 会话初始化（不阻塞）
+    supabaseClient.auth.getSession().catch(() => {});
+  } catch (e) { /* 预热失败不影响后续流程 */ }
+}
+
+// 从 localStorage 兜底读取 Supabase 会话（网络读 session 超时时使用）
+function readSessionFromStorage() {
+  try {
+    const ref = new URL(SUPABASE_CONFIG.url).hostname.split('.')[0];
+    const raw = localStorage.getItem('sb-' + ref + '-auth-token');
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    // 只要还有 refresh_token 就能恢复会话，视为已登录
+    return parsed && parsed.refresh_token ? parsed : null;
+  } catch (e) { return null; }
+}
+
+// 获取当前登录用户（优先本地 session，加超时兜底，避免冷启动时卡住）
 async function getCurrentUser() {
   if (!supabaseClient) return null;
-  const { data: { session } } = await supabaseClient.auth.getSession();
+  let session = null;
+  try {
+    const res = await withTimeout(supabaseClient.auth.getSession(), 4000, '会话读取');
+    session = res && res.data ? res.data.session : null;
+  } catch (e) {
+    // 会话读取超时：用本地存储兜底判断登录状态，不让用户卡在加载界面
+    const cached = readSessionFromStorage();
+    if (cached && cached.user) {
+      syncState.userEmail = cached.user.email || null;
+      return cached.user;
+    }
+    return null;
+  }
   if (!session) return null;
   syncState.userEmail = session.user?.email || null;
   return session.user;
