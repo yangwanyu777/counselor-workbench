@@ -366,6 +366,8 @@ async function init() {
   await initDB();
   await loadStudentFieldConfig();
   initSupabase();
+  // 立即后台预热 Supabase：用户填写登录信息期间项目已被唤醒，缩短点击登录后的等待
+  if (isSupabaseReady()) warmupSupabase();
 
   if (isSupabaseReady()) {
     // Supabase 模式：检查已保存的登录会话
@@ -438,12 +440,20 @@ async function handleLogin() {
     if (!password) { errorEl.textContent = '请输入密码'; return; }
 
     const btn = document.getElementById('loginBtn');
-    btn.textContent = '登录中...';
     btn.disabled = true;
     errorEl.textContent = '';
+    // 阶段提示：先显示"正在连接"，3秒后仍未完成则提示"云端唤醒中"，避免用户干等以为卡死
+    let step = 0;
+    btn.textContent = '⏳ 正在连接云端…';
+    const hintTimer = setInterval(() => {
+      step++;
+      if (step === 1) btn.textContent = '⏳ 云端唤醒中，请稍候…';
+      else if (step === 2) btn.textContent = '⏳ 仍在连接，可稍后或试离线模式';
+    }, 3000);
 
     try {
       await supabaseSignIn(email, password);
+      clearInterval(hintTimer);
       // 登录成功，立即进入页面，云端同步放到后台执行，避免云端慢时卡在登录界面
       showApp();
       showToast('登录成功，正在后台同步数据…', 'success');
@@ -463,6 +473,7 @@ async function handleLogin() {
       });
       return;
     } catch (e) {
+      clearInterval(hintTimer);
       const msg = String(e.message || '');
       if (/load failed|fetch failed|failed to fetch|network|networkerror|timeout|aborted|超时/i.test(msg)) {
         errorEl.textContent = '云端服务暂时无法连接：免费版 Supabase 项目可能因一段时间未使用被暂停（冷启动较慢）。可先点击下方「离线模式进入」使用本设备数据，稍后登录 supabase.com 在项目页点击 Restore project 恢复。';
@@ -470,6 +481,7 @@ async function handleLogin() {
         errorEl.textContent = msg || '登录失败，请检查邮箱和密码';
       }
     } finally {
+      clearInterval(hintTimer);
       btn.textContent = '登 录';
       btn.disabled = false;
     }
@@ -939,7 +951,7 @@ MODULE_RENDERERS.dashboard = async function(container) {
       <div>
         ${keyNews.map(s => `
           <div class="news-item">
-            <span class="news-tag tag-blue">${escapeHtml(s.category || s.source)}</span>
+            <span class="news-tag tag-blue">${escapeHtml(newsCatLabel(s.category) || s.source)}</span>
             <div class="news-content">
               <a href="${escapeHtml(s.url)}" target="_blank" rel="noopener noreferrer" style="text-decoration:none">
                 <div class="news-title">${escapeHtml(s.title)}</div>
@@ -4912,8 +4924,8 @@ MODULE_RENDERERS.news = async function(container) {
         <button class="btn btn-outline btn-sm" onclick="loadNewsFeed(true)">🔄 刷新资讯</button>
       </div>
       <div class="tabs" id="newsTabs">
-        <button class="tab active" onclick="switchNewsTab('全部', this)">全部</button>
-        ${categories.map(cat => `<button class="tab" onclick="switchNewsTab('${cat}', this)">${cat}</button>`).join('')}
+        <button class="tab active" data-cat="全部" onclick="switchNewsTab('全部', this)">全部</button>
+        ${categories.map(c => `<button class="tab" data-cat="${escapeHtml(c.key)}" title="${escapeHtml(c.key)}" onclick="switchNewsTab('${escapeHtml(c.key)}', this)">${escapeHtml(c.label)}</button>`).join('')}
       </div>
       <div id="newsContent"><div class="empty-text" style="padding:24px">正在加载资讯…</div></div>
     </div>
@@ -4931,15 +4943,33 @@ MODULE_RENDERERS.news = async function(container) {
         `).join('')}
       </div>
       <p style="font-size:12px;color:var(--text-muted);line-height:1.7;margin-top:12px">
-        说明：上方「资讯推送」由每日自动化任务从官方渠道抓取并筛选（学生工作、就业创业、奖助学金、政策安全、理论研究、AI赋能辅导员六个方向），点击标题直接打开原文。下方保留官方入口，方便直达栏目页查看更多。
+        说明：上方「资讯推送」依据教育部《普通高等学校辅导员队伍建设规定》（43号令）的辅导员九大职责分类，另设「AI赋能辅导员」专题；由每日自动化任务从官方渠道抓取并筛选，点击标题直接打开原文。分类：思想理论教育和价值引领、党团和班级建设、学风建设、学生日常事务管理、心理健康教育与咨询工作、网络思想政治教育、校园危机事件应对、职业规划与就业创业指导、理论和实践研究、AI赋能辅导员。下方保留官方入口，方便直达栏目页查看更多。
       </p>
     </div>
   `;
   await loadNewsFeed(false);
 };
 
-// 资讯分类（与 news-feed.json 保持一致）
-const NEWS_CATEGORIES = ['学生工作/思政教育', '就业创业', '奖助学金/资助', '政策新规/安全', '理论研究', 'AI赋能辅导员'];
+// 资讯分类：教育部《普通高等学校辅导员队伍建设规定》（43号令）九大职责 + AI赋能辅导员
+// key 为官方职责全称（与 news-feed.json 的 category 一致），label 为 tab 简称
+const NEWS_CATEGORIES = [
+  { key: '思想理论教育和价值引领', label: '思想引领' },
+  { key: '党团和班级建设', label: '党团班级' },
+  { key: '学风建设', label: '学风建设' },
+  { key: '学生日常事务管理', label: '日常事务' },
+  { key: '心理健康教育与咨询工作', label: '心理健康' },
+  { key: '网络思想政治教育', label: '网络思政' },
+  { key: '校园危机事件应对', label: '危机应对' },
+  { key: '职业规划与就业创业指导', label: '就业指导' },
+  { key: '理论和实践研究', label: '理论研究' },
+  { key: 'AI赋能辅导员', label: 'AI赋能' }
+];
+
+// 分类全称 → 简称（首页标签用；未知分类原样返回）
+function newsCatLabel(key) {
+  const c = NEWS_CATEGORIES.find(x => x.key === key);
+  return c ? c.label : (key || '资讯');
+}
 
 // 加载资讯数据（优先读缓存，可强制刷新）
 async function loadNewsFeed(force) {
