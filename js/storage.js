@@ -4,7 +4,7 @@
    ============================================ */
 
 const DB_NAME = 'counselor_workbench';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 
 let db = null;
 
@@ -23,6 +23,13 @@ const STORES = {
   ]},
   assessments: { keyPath: 'id', autoIncrement: true, indexes: [
     { name: 'studentId', keyPath: 'studentId', unique: false },
+    { name: 'academicYear', keyPath: 'academicYear', unique: false }
+  ]},
+  // 学生获奖情况（对接在线收集表导出的 Excel / 手动录入）
+  awards: { keyPath: 'id', autoIncrement: true, indexes: [
+    { name: 'studentId', keyPath: 'studentId', unique: false },
+    { name: 'awardLevel', keyPath: 'awardLevel', unique: false },
+    { name: 'awardType', keyPath: 'awardType', unique: false },
     { name: 'academicYear', keyPath: 'academicYear', unique: false }
   ]},
   settings: { keyPath: 'key' },
