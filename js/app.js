@@ -4180,9 +4180,31 @@ async function deleteAward(id) {
 }
 
 // ---------- 生涯规划 ----------
-const CAREER_GOALS = ['考研', '考公', '就业求职', '出国留学', '暂未规划'];
-const CAREER_GOAL_COLORS = ['#1E4E8C', '#38A169', '#D69E2E', '#E53E3E', '#718096'];
+const CAREER_GOALS = ['考研', '考公', '就业求职', '出国留学', '暂未规划', '其他'];
+const CAREER_GOAL_COLORS = ['#1E4E8C', '#38A169', '#D69E2E', '#E53E3E', '#718096', '#9F7AEA'];
 const CAREER_LEVELS = ['本科', '硕士', '博士'];
+
+// 将生涯规划目标（可能是"考研+就业""考公（已签三方）"等详细谈话记录）智能归类到标准类别。
+// 归类优先级：暂未规划 > 考研 > 考公 > 出国留学 > 就业求职 > 其他。
+// 含升学/考试意向的优先归入对应类别（如"考研+就业"→考研、"考公+就业"→考公）；
+// 非"暂未规划"但无法识别的记录归入"其他"，避免被误算成"暂未规划"。
+function classifyCareerGoal(raw) {
+  const v = String(raw == null ? '' : raw).trim();
+  if (!v) return '暂未规划';
+  const s = v.replace(/\s+/g, '');
+  // 明确的"暂未规划"类表述（整体就是这个意思，而非记录里恰好提到）
+  if (/^(暂未规划|未规划|暂无规划|没有规划|没想好|待定|暂未确定|未确定|暂无目标|不明确)$/.test(s)) return '暂未规划';
+  // 考研 / 升学（优先级最高，兼容"考研+就业""准备考研同时找工作"等）
+  if (/考研|读研|升学|研究生|保研|推免|考博|深造|专硕|学硕|拟考研/.test(s)) return '考研';
+  // 考公 / 编制
+  if (/考公|公务员|选调|事业编|编制|事业单位|公考|考编|国网|烟草|银行/.test(s)) return '考公';
+  // 出国 / 留学
+  if (/出国|留学|境外|海外|雅思|托福|gre|gmat|港澳|海外名校/i.test(s)) return '出国留学';
+  // 就业 / 求职（记录里单独提到或组合里未命中前面几类）
+  if (/就业|求职|找工作|工作|签约|入职|实习|三方|择业|应聘|招聘/.test(s)) return '就业求职';
+  // 其余非"暂未规划"的详细记录：无法可靠识别 → 其他
+  return '其他';
+}
 
 // 将学生库中的学历层次归一到 本科/硕士/博士 三档（兼容"硕士研究生/博士研究生/硕士/博士"等写法）
 function normalizeCareerLevel(val) {
@@ -4236,7 +4258,7 @@ function renderCareerByLevel() {
   const goals = {}; CAREER_GOALS.forEach(g => goals[g] = 0);
   const classGoals = {};
   scoped.forEach(s => {
-    const goal = CAREER_GOALS.includes(s.careerGoal) ? s.careerGoal : '暂未规划';
+    const goal = classifyCareerGoal(s.careerGoal);
     goals[goal]++;
     const cn = s.className || '未分班';
     if (!classGoals[cn]) { classGoals[cn] = {}; CAREER_GOALS.forEach(g => classGoals[cn][g] = 0); }
@@ -4254,7 +4276,7 @@ function renderCareerByLevel() {
           const count = goals[goal];
           const pct = total > 0 ? ((count / total) * 100).toFixed(1) : 0;
           const idx = CAREER_GOALS.indexOf(goal);
-          return `<div class="stat-card ${['stat-blue','stat-green','stat-orange','stat-red','stat-orange'][idx]}">
+          return `<div class="stat-card ${['stat-blue','stat-green','stat-orange','stat-red','stat-orange','stat-blue'][idx]}">
             <div class="stat-value">${count}</div>
             <div class="stat-label">${goal} (${pct}%)</div>
           </div>`;
@@ -4364,7 +4386,7 @@ function careerLevelStats() {
     const list = state.students.filter(s => normalizeCareerLevel(s.gradeLevel) === level);
     const goals = {}; CAREER_GOALS.forEach(g => goals[g] = 0);
     list.forEach(s => {
-      const goal = CAREER_GOALS.includes(s.careerGoal) ? s.careerGoal : '暂未规划';
+      const goal = classifyCareerGoal(s.careerGoal);
       goals[goal]++;
     });
     return { level, count: list.length, goals };
