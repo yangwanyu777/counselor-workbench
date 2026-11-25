@@ -4276,9 +4276,9 @@ function renderCareerByLevel() {
           const count = goals[goal];
           const pct = total > 0 ? ((count / total) * 100).toFixed(1) : 0;
           const idx = CAREER_GOALS.indexOf(goal);
-          return `<div class="stat-card ${['stat-blue','stat-green','stat-orange','stat-red','stat-orange','stat-blue'][idx]}">
+          return `<div class="stat-card stat-card-clickable ${['stat-blue','stat-green','stat-orange','stat-red','stat-orange','stat-blue'][idx]}" onclick="showCareerGoalStudents('${goal}')" title="点击查看「${goal}」学生名单">
             <div class="stat-value">${count}</div>
-            <div class="stat-label">${goal} (${pct}%)</div>
+            <div class="stat-label">${goal} (${pct}%) <span class="stat-drill-hint">名单 ›</span></div>
           </div>`;
         }).join('')}
       </div>
@@ -4306,7 +4306,7 @@ function renderCareerByLevel() {
             ${Object.keys(classGoals).sort().map(cn => {
               const g = classGoals[cn];
               const sum = CAREER_GOALS.reduce((a, k) => a + g[k], 0);
-              return `<tr><td>${escapeHtml(cn)}</td>${CAREER_GOALS.map(k => `<td>${g[k]}</td>`).join('')}<td><strong>${sum}</strong></td></tr>`;
+              return `<tr><td>${escapeHtml(cn)}</td>${CAREER_GOALS.map(k => `<td class="cell-clickable" onclick="showCareerGoalStudents('${k}', {className:decodeURIComponent('${encodeURIComponent(cn)}')})" title="查看${escapeHtml(cn)}的「${k}」学生名单">${g[k]}</td>`).join('')}<td><strong>${sum}</strong></td></tr>`;
             }).join('') || `<tr><td colspan="${CAREER_GOALS.length + 2}">暂无数据</td></tr>`}
           </tbody>
         </table>
@@ -4398,8 +4398,54 @@ function levelsTableRows() {
   const stats = careerLevelStats();
   return stats.map(x => {
     const sum = CAREER_GOALS.reduce((a, g) => a + x.goals[g], 0);
-    return `<tr><td>${escapeHtml(x.level)}</td>${CAREER_GOALS.map(g => `<td>${x.goals[g]}</td>`).join('')}<td><strong>${sum}</strong></td></tr>`;
+    return `<tr><td>${escapeHtml(x.level)}</td>${CAREER_GOALS.map(g => `<td class="cell-clickable" onclick="showCareerGoalStudents('${g}', {level:'${x.level}'})" title="查看${x.level}的「${g}」学生名单">${x.goals[g]}</td>`).join('')}<td><strong>${sum}</strong></td></tr>`;
   }).join('') || `<tr><td colspan="${CAREER_GOALS.length + 2}">暂无数据</td></tr>`;
+}
+
+// 点击生涯目标统计类目/明细数字，弹出该类目下的具体学生名单
+// filters 可选：{ level: '本科'|'硕士'|'博士', className: 'xxx' }，用于班级明细/学历对比下钻
+function showCareerGoalStudents(goal, filters) {
+  filters = filters || {};
+  const level = (filters.level !== undefined ? filters.level : (state.careerLevel || ''));
+  const className = filters.className || '';
+  let scoped = level ? state.students.filter(s => normalizeCareerLevel(s.gradeLevel) === level) : state.students;
+  if (className) scoped = scoped.filter(s => (s.className || '未分班') === className);
+  const list = scoped.filter(s => classifyCareerGoal(s.careerGoal) === goal);
+
+  const scopeBits = [level ? level : '全部学历层次'];
+  if (className) scopeBits.push(className);
+  const scopeLabel = scopeBits.join(' · ');
+  const idx = CAREER_GOALS.indexOf(goal);
+  const color = CAREER_GOAL_COLORS[idx] || '#1E4E8C';
+
+  const bodyHTML = `
+    <div style="margin-bottom:12px;padding:10px 12px;background:var(--bg-blue);border-radius:8px;font-size:13px;color:var(--text-muted);line-height:1.7">
+      筛选范围：<strong style="color:var(--text-title)">${escapeHtml(scopeLabel)}</strong> ／
+      生涯目标归类：<strong style="color:${color}">${escapeHtml(goal)}</strong> ／
+      共 <strong style="color:var(--text-title)">${list.length}</strong> 人
+      <div style="font-size:12px;margin-top:2px">「生涯规划目标」显示学生原始填写内容（含详细谈话记录）。</div>
+    </div>
+    ${list.length > 0 ? `
+      <div class="table-wrapper">
+        <table class="data-table">
+          <thead><tr><th>序号</th><th>姓名</th><th>学号</th><th>专业</th><th>班级</th><th>学历层次</th><th>生涯规划目标（原文）</th></tr></thead>
+          <tbody>
+            ${list.map((s, i) => `<tr>
+              <td class="row-seq">${i + 1}</td>
+              <td>${escapeHtml(s.name || '-')}</td>
+              <td>${escapeHtml(s.studentId || '-')}</td>
+              <td>${escapeHtml(s.major || '-')}</td>
+              <td>${escapeHtml(s.className || '-')}</td>
+              <td>${escapeHtml(normalizeCareerLevel(s.gradeLevel) || s.gradeLevel || '-')}</td>
+              <td style="white-space:normal;max-width:260px">${escapeHtml(String(s.careerGoal || '').trim() || '—')}</td>
+            </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>
+    ` : '<div class="empty-state"><div class="empty-text">该范围内暂无学生</div></div>'}
+  `;
+  showModal(`🎯 ${escapeHtml(scopeLabel)} · ${escapeHtml(goal)}名单`, bodyHTML,
+    `<button class="btn btn-outline" onclick="closeModal()">关闭</button>`);
 }
 
 // ---------- 竞赛指导 ----------
