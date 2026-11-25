@@ -1241,14 +1241,24 @@ async function saveCareerGoal(id, inputEl) {
   if (!s) return;
   const oldVal = String(s.careerGoal || '').trim();
   if (newVal === oldVal) { cancelEditCareerGoal(id); return; }
+  const oldGoal = classifyCareerGoal(oldVal);
+  const newGoal = classifyCareerGoal(newVal);
+  const inModal = !!spanEl.closest('#modalContainer');
   spanEl.dataset.saving = '1';
   s.careerGoal = newVal;
   s.updatedAt = Date.now();
-  await dbPut('students', s);
+  await dbPut('students', s); // 自动触发云同步；学生信息页再次打开会从 db 读取到最新值
   const idx = state.students.findIndex(x => x.id === id);
   if (idx >= 0) state.students[idx] = s;
-  showToast('生涯规划目标已更新', 'success');
+  showToast(inModal && newGoal !== oldGoal ? `已更新，归类调整为「${newGoal}」` : '生涯规划目标已更新', 'success');
   cancelEditCareerGoal(id);
+  // 弹窗内编辑且归类发生变化：该学生已不属于当前查看的类目，按原范围重算名单与统计卡片
+  if (inModal && newGoal !== oldGoal && state.careerGoalModalCtx) {
+    const { goal, filters } = state.careerGoalModalCtx;
+    showCareerGoalStudents(goal, filters);
+    const careerContainer = document.getElementById('careerContent');
+    if (careerContainer) renderCareerByLevel();
+  }
 }
 
 function cancelEditCareerGoal(id) {
@@ -4406,6 +4416,8 @@ function levelsTableRows() {
 // filters 可选：{ level: '本科'|'硕士'|'博士', className: 'xxx' }，用于班级明细/学历对比下钻
 function showCareerGoalStudents(goal, filters) {
   filters = filters || {};
+  // 记住本次弹窗上下文，供编辑目标后归类变化时按同样范围重算名单
+  state.careerGoalModalCtx = { goal, filters: { ...filters } };
   const level = (filters.level !== undefined ? filters.level : (state.careerLevel || ''));
   const className = filters.className || '';
   let scoped = level ? state.students.filter(s => normalizeCareerLevel(s.gradeLevel) === level) : state.students;
@@ -4423,12 +4435,12 @@ function showCareerGoalStudents(goal, filters) {
       筛选范围：<strong style="color:var(--text-title)">${escapeHtml(scopeLabel)}</strong> ／
       生涯目标归类：<strong style="color:${color}">${escapeHtml(goal)}</strong> ／
       共 <strong style="color:var(--text-title)">${list.length}</strong> 人
-      <div style="font-size:12px;margin-top:2px">「生涯规划目标」显示学生原始填写内容（含详细谈话记录）。</div>
+      <div style="font-size:12px;margin-top:2px">「生涯规划目标」可直接点击编辑，保存后自动同步到学生信息页；归类变化时名单会自动更新。</div>
     </div>
     ${list.length > 0 ? `
       <div class="table-wrapper">
         <table class="data-table">
-          <thead><tr><th>序号</th><th>姓名</th><th>学号</th><th>专业</th><th>班级</th><th>学历层次</th><th>生涯规划目标（原文）</th></tr></thead>
+          <thead><tr><th>序号</th><th>姓名</th><th>学号</th><th>专业</th><th>班级</th><th>学历层次</th><th>生涯规划目标（原文·可编辑）</th></tr></thead>
           <tbody>
             ${list.map((s, i) => `<tr>
               <td class="row-seq">${i + 1}</td>
@@ -4437,12 +4449,15 @@ function showCareerGoalStudents(goal, filters) {
               <td>${escapeHtml(s.major || '-')}</td>
               <td>${escapeHtml(s.className || '-')}</td>
               <td>${escapeHtml(normalizeCareerLevel(s.gradeLevel) || s.gradeLevel || '-')}</td>
-              <td style="white-space:normal;max-width:260px">${escapeHtml(String(s.careerGoal || '').trim() || '—')}</td>
+              <td style="white-space:normal;max-width:280px">${renderCareerGoalCell(s)}</td>
             </tr>`).join('')}
           </tbody>
         </table>
       </div>
     ` : '<div class="empty-state"><div class="empty-text">该范围内暂无学生</div></div>'}
+    <datalist id="careerGoalSuggestions">
+      ${[...new Set(['暂未规划', '考研', '考公', '就业求职', '出国留学', ...state.students.map(s => String(s.careerGoal || '').trim()).filter(Boolean)])].map(v => `<option value="${escapeHtml(v)}"></option>`).join('')}
+    </datalist>
   `;
   showModal(`🎯 ${escapeHtml(scopeLabel)} · ${escapeHtml(goal)}名单`, bodyHTML,
     `<button class="btn btn-outline" onclick="closeModal()">关闭</button>`);
