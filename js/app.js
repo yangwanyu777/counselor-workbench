@@ -1241,8 +1241,9 @@ async function saveCareerGoal(id, inputEl) {
   if (!s) return;
   const oldVal = String(s.careerGoal || '').trim();
   if (newVal === oldVal) { cancelEditCareerGoal(id); return; }
-  const oldGoal = classifyCareerGoal(oldVal);
-  const newGoal = classifyCareerGoal(newVal);
+  const oldGoal = getCareerGoalInfo(s).goal;
+  // 有手动归类时原文变化不影响归类；否则按新原文自动归类
+  const newGoal = getCareerGoalInfo({ ...s, careerGoal: newVal }).goal;
   const inModal = !!spanEl.closest('#modalContainer');
   spanEl.dataset.saving = '1';
   s.careerGoal = newVal;
@@ -4216,6 +4217,36 @@ function classifyCareerGoal(raw) {
   return '其他';
 }
 
+// 统一归类入口：手动指定（careerGoalOverride）优先，否则用自动归类。
+// 返回 { goal:生效分类, auto:自动分类, manual:手动分类或'' }，全站生涯统计都走这里。
+function getCareerGoalInfo(s) {
+  const auto = classifyCareerGoal(s && s.careerGoal);
+  const ov = String((s && s.careerGoalOverride) || '').trim();
+  const manual = CAREER_GOALS.includes(ov) ? ov : '';
+  return { goal: manual || auto, auto, manual };
+}
+function getCareerGoal(s) { return getCareerGoalInfo(s).goal; }
+
+// 名单弹窗内手动调整某学生的归类（value 为空表示恢复自动归类）
+async function changeCareerGoalOverride(id, value) {
+  const s = state.students.find(x => x.id === id);
+  if (!s) return;
+  const v = CAREER_GOALS.includes(value) ? value : '';
+  if (v) s.careerGoalOverride = v; else delete s.careerGoalOverride;
+  s.updatedAt = Date.now();
+  await dbPut('students', s); // 自动触发云同步；学生信息页再次打开读到最新值
+  const idx = state.students.findIndex(x => x.id === id);
+  if (idx >= 0) state.students[idx] = s;
+  showToast(v ? `归类已手动调整为「${v}」` : '已恢复自动归类', 'success');
+  // 归类可能变化 → 按原范围重算名单与统计（该生可能移出当前类目）
+  if (state.careerGoalModalCtx) {
+    const { goal, filters } = state.careerGoalModalCtx;
+    showCareerGoalStudents(goal, filters);
+  }
+  const careerContainer = document.getElementById('careerContent');
+  if (careerContainer) renderCareerByLevel();
+}
+
 // 将学生库中的学历层次归一到 本科/硕士/博士 三档（兼容"硕士研究生/博士研究生/硕士/博士"等写法）
 function normalizeCareerLevel(val) {
   const v = String(val || '').trim();
@@ -4268,7 +4299,7 @@ function renderCareerByLevel() {
   const goals = {}; CAREER_GOALS.forEach(g => goals[g] = 0);
   const classGoals = {};
   scoped.forEach(s => {
-    const goal = classifyCareerGoal(s.careerGoal);
+    const goal = getCareerGoal(s);
     goals[goal]++;
     const cn = s.className || '未分班';
     if (!classGoals[cn]) { classGoals[cn] = {}; CAREER_GOALS.forEach(g => classGoals[cn][g] = 0); }
@@ -4396,7 +4427,7 @@ function careerLevelStats() {
     const list = state.students.filter(s => normalizeCareerLevel(s.gradeLevel) === level);
     const goals = {}; CAREER_GOALS.forEach(g => goals[g] = 0);
     list.forEach(s => {
-      const goal = classifyCareerGoal(s.careerGoal);
+      const goal = getCareerGoal(s);
       goals[goal]++;
     });
     return { level, count: list.length, goals };
@@ -4422,7 +4453,7 @@ function showCareerGoalStudents(goal, filters) {
   const className = filters.className || '';
   let scoped = level ? state.students.filter(s => normalizeCareerLevel(s.gradeLevel) === level) : state.students;
   if (className) scoped = scoped.filter(s => (s.className || '未分班') === className);
-  const list = scoped.filter(s => classifyCareerGoal(s.careerGoal) === goal);
+  const list = scoped.filter(s => getCareerGoal(s) === goal);
 
   const scopeBits = [level ? level : '全部学历层次'];
   if (className) scopeBits.push(className);
@@ -4435,14 +4466,16 @@ function showCareerGoalStudents(goal, filters) {
       筛选范围：<strong style="color:var(--text-title)">${escapeHtml(scopeLabel)}</strong> ／
       生涯目标归类：<strong style="color:${color}">${escapeHtml(goal)}</strong> ／
       共 <strong style="color:var(--text-title)">${list.length}</strong> 人
-      <div style="font-size:12px;margin-top:2px">「生涯规划目标」可直接点击编辑，保存后自动同步到学生信息页；归类变化时名单会自动更新。</div>
+      <div style="font-size:12px;margin-top:2px">「生涯规划目标」可点击编辑并自动同步；右侧下拉可手动调整归类，分错的选「其他」即可，也可随时改回自动归类。</div>
     </div>
     ${list.length > 0 ? `
       <div class="table-wrapper">
         <table class="data-table">
-          <thead><tr><th>序号</th><th>姓名</th><th>学号</th><th>专业</th><th>班级</th><th>学历层次</th><th>生涯规划目标（原文·可编辑）</th></tr></thead>
+          <thead><tr><th>序号</th><th>姓名</th><th>学号</th><th>专业</th><th>班级</th><th>学历层次</th><th>生涯规划目标（原文·可编辑）</th><th>归类（可调整）</th></tr></thead>
           <tbody>
-            ${list.map((s, i) => `<tr>
+            ${list.map((s, i) => {
+              const gi = getCareerGoalInfo(s);
+              return `<tr>
               <td class="row-seq">${i + 1}</td>
               <td>${escapeHtml(s.name || '-')}</td>
               <td>${escapeHtml(s.studentId || '-')}</td>
@@ -4450,7 +4483,14 @@ function showCareerGoalStudents(goal, filters) {
               <td>${escapeHtml(s.className || '-')}</td>
               <td>${escapeHtml(normalizeCareerLevel(s.gradeLevel) || s.gradeLevel || '-')}</td>
               <td style="white-space:normal;max-width:280px">${renderCareerGoalCell(s)}</td>
-            </tr>`).join('')}
+              <td style="white-space:nowrap">
+                <select class="goal-override-select ${gi.manual ? 'manual' : ''}" onchange="changeCareerGoalOverride(${s.id}, this.value)" title="手动调整归类">
+                  <option value="" ${gi.manual ? '' : 'selected'}>自动：${gi.auto}</option>
+                  ${CAREER_GOALS.map(g => `<option value="${g}" ${gi.goal === g ? 'selected' : ''}>${g}</option>`).join('')}
+                </select>
+              </td>
+            </tr>`;
+            }).join('')}
           </tbody>
         </table>
       </div>
