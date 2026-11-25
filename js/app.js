@@ -4310,8 +4310,13 @@ function renderCareerByLevel() {
 
   container.innerHTML = `
     <div class="card" style="margin-bottom:16px">
-      <div class="card-header"><div class="card-title">📊 ${escapeHtml(scopeLabel)} · 生涯目标统计</div>
-        <span class="tag tag-blue">${total} 人</span></div>
+      <div class="card-header">
+        <div class="card-title">📊 ${escapeHtml(scopeLabel)} · 生涯目标统计 <span class="tag tag-blue">${total} 人</span></div>
+        <div class="card-action-group">
+          <button class="btn btn-outline btn-sm" onclick="exportCareerSummary()" title="导出当前生涯目标统计表">📤 导出统计</button>
+          <button class="btn btn-outline btn-sm" onclick="exportCareerAll()" title="导出全部统计，含多个工作表">📦 导出全部</button>
+        </div>
+      </div>
       <div class="stat-grid">
         ${CAREER_GOALS.map(goal => {
           const count = goals[goal];
@@ -4339,7 +4344,10 @@ function renderCareerByLevel() {
     </div>
 
     <div class="card" style="margin-bottom:16px">
-      <div class="card-header"><div class="card-title">${escapeHtml(scopeLabel)} · 班级明细</div></div>
+      <div class="card-header">
+        <div class="card-title">${escapeHtml(scopeLabel)} · 班级明细</div>
+        <button class="btn btn-outline btn-sm" onclick="exportCareerClassDetail()" title="导出当前班级明细表">📤 导出表格</button>
+      </div>
       <div class="table-wrapper">
         <table class="data-table">
           <thead><tr><th>班级</th>${CAREER_GOALS.map(g => `<th>${g}</th>`).join('')}<th>合计</th></tr></thead>
@@ -4354,8 +4362,11 @@ function renderCareerByLevel() {
       </div>
     </div>
 
-    <div class="card">
-      <div class="card-header"><div class="card-title">📈 各学历层次生涯目标对比（全部层次）</div></div>
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-header">
+        <div class="card-title">📈 各学历层次生涯目标对比（全部层次）</div>
+        <button class="btn btn-outline btn-sm" onclick="exportCareerLevelCompare()" title="导出学历层次对比表">📤 导出表格</button>
+      </div>
       <div class="chart-container"><canvas id="careerLevelCompare"></canvas></div>
       <div class="table-wrapper" style="margin-top:12px">
         <table class="data-table">
@@ -4365,6 +4376,21 @@ function renderCareerByLevel() {
           </tbody>
         </table>
       </div>
+    </div>
+
+    <div class="card ai-analysis-card">
+      <div class="card-header">
+        <div>
+          <div class="card-title">🤖 AI 智能分析（本地生成 · 隐私安全）</div>
+          <div class="card-subtitle">基于当前「${escapeHtml(scopeLabel)}」统计数据自动生成，全程不联网、不含学生个人隐私</div>
+        </div>
+        <div class="card-action-group">
+          <button class="btn btn-outline btn-sm" onclick="refreshCareerAI()" title="按当前数据重新生成分析">🔄 重新分析</button>
+          <button class="btn btn-outline btn-sm" onclick="copyCareerDigest()" title="复制脱敏统计摘要，可粘贴到外部AI深入分析">📋 复制脱敏摘要</button>
+        </div>
+      </div>
+      <div id="careerAIBox" class="ai-insight-box"></div>
+      <div class="ai-privacy-note">🔒 脱敏摘要仅包含人数与班级等群体统计，不含任何姓名、学号、手机号等个人信息，可放心粘贴到豆包 / DeepSeek 等外部 AI 工具深入分析。</div>
     </div>
   `;
 
@@ -4419,6 +4445,9 @@ function renderCareerByLevel() {
     },
     options: { responsive: true, maintainAspectRatio: false, scales: { x: { stacked: true }, y: { stacked: true, beginAtZero: true, ticks: { stepSize: 1 } } }, plugins: { title: { display: true, text: '各学历层次生涯目标人数对比' } } }
   });
+
+  // 填充 AI 智能分析卡片
+  refreshCareerAI();
 }
 
 // 计算各学历层次的生涯目标统计
@@ -4500,7 +4529,251 @@ function showCareerGoalStudents(goal, filters) {
     </datalist>
   `;
   showModal(`🎯 ${escapeHtml(scopeLabel)} · ${escapeHtml(goal)}名单`, bodyHTML,
-    `<button class="btn btn-outline" onclick="closeModal()">关闭</button>`);
+    `<button class="btn btn-primary" onclick="exportCareerCurrentList()" title="导出当前名单到本地Excel">📤 导出本名单(${list.length})</button>
+     <button class="btn btn-outline" onclick="closeModal()">关闭</button>`);
+}
+
+// ========== 生涯规划：导出 / AI 分析 / 脱敏摘要 ==========
+// 计算当前范围的生涯统计（导出与 AI 分析共用同一口径）
+function computeCareerStats(level) {
+  const scoped = level ? state.students.filter(s => normalizeCareerLevel(s.gradeLevel) === level) : state.students;
+  const goals = {}; CAREER_GOALS.forEach(g => goals[g] = 0);
+  const classGoals = {};
+  scoped.forEach(s => {
+    const goal = getCareerGoal(s);
+    goals[goal]++;
+    const cn = s.className || '未分班';
+    if (!classGoals[cn]) { classGoals[cn] = {}; CAREER_GOALS.forEach(g => classGoals[cn][g] = 0); }
+    classGoals[cn][goal]++;
+  });
+  return { scoped, goals, classGoals, total: scoped.length, scopeLabel: level || '全部学历层次' };
+}
+
+// 汇总表行：各生涯目标人数与占比
+function careerSummaryRows(level) {
+  const { goals, total, scopeLabel } = computeCareerStats(level);
+  const rows = CAREER_GOALS.map(g => ({
+    '统计范围': scopeLabel, '生涯目标': g, '人数': goals[g],
+    '占比(%)': total ? (goals[g] / total * 100).toFixed(1) : '0.0'
+  }));
+  rows.push({ '统计范围': scopeLabel, '生涯目标': '合计', '人数': total, '占比(%)': '100.0' });
+  return rows;
+}
+
+// 班级明细表行
+function careerClassRows(level) {
+  const { classGoals, scopeLabel } = computeCareerStats(level);
+  return Object.keys(classGoals).sort().map(cn => {
+    const row = { '统计范围': scopeLabel, '班级': cn };
+    CAREER_GOALS.forEach(g => { row[g] = classGoals[cn][g]; });
+    row['合计'] = CAREER_GOALS.reduce((a, g) => a + classGoals[cn][g], 0);
+    return row;
+  });
+}
+
+// 学历层次对比表行（固定全部层次）
+function careerLevelRows() {
+  return careerLevelStats().map(x => {
+    const row = { '学历层次': x.level };
+    CAREER_GOALS.forEach(g => { row[g] = x.goals[g]; });
+    row['合计'] = x.count;
+    return row;
+  });
+}
+
+// 导出：当前生涯目标汇总
+function exportCareerSummary() {
+  const level = state.careerLevel || '';
+  const st = computeCareerStats(level);
+  exportToExcel(careerSummaryRows(level), `生涯目标汇总_${st.scopeLabel}_${formatDate(new Date())}.xlsx`, '目标汇总');
+  showToast('已导出生涯目标汇总', 'success');
+}
+
+// 导出：当前班级明细
+function exportCareerClassDetail() {
+  const level = state.careerLevel || '';
+  const st = computeCareerStats(level);
+  const rows = careerClassRows(level);
+  if (!rows.length) { showToast('暂无班级数据可导出', 'error'); return; }
+  exportToExcel(rows, `生涯班级明细_${st.scopeLabel}_${formatDate(new Date())}.xlsx`, '班级明细');
+  showToast('已导出班级明细', 'success');
+}
+
+// 导出：各学历层次对比
+function exportCareerLevelCompare() {
+  const rows = careerLevelRows();
+  if (!rows.length) { showToast('暂无数据可导出', 'error'); return; }
+  exportToExcel(rows, `生涯学历层次对比_${formatDate(new Date())}.xlsx`, '学历层次对比');
+  showToast('已导出学历层次对比', 'success');
+}
+
+// 导出：全部统计（多 sheet 工作簿）
+function exportCareerAll() {
+  const wb = XLSX.utils.book_new();
+  const add = (rows, name) => { if (rows && rows.length) XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), name); };
+  add(careerSummaryRows(''), '总体目标汇总');
+  add(careerClassRows(''), '班级明细(全部)');
+  add(careerLevelRows(), '学历层次对比');
+  // 各学历层次分别的班级明细
+  CAREER_LEVELS.forEach(lv => add(careerClassRows(lv), `${lv}班级明细`));
+  XLSX.writeFile(wb, `生涯规划统计全集_${formatDate(new Date())}.xlsx`);
+  showToast('已导出全部统计（含多个工作表）', 'success');
+}
+
+// 导出：名单弹窗当前分类名单（含姓名学号，导出到本地文件，不联网）
+function exportCareerCurrentList() {
+  const ctx = state.careerGoalModalCtx;
+  if (!ctx) { showToast('名单上下文已失效，请重新打开名单', 'error'); return; }
+  const { goal, filters } = ctx;
+  const level = filters.level !== undefined ? filters.level : (state.careerLevel || '');
+  const className = filters.className || '';
+  let scoped = level ? state.students.filter(s => normalizeCareerLevel(s.gradeLevel) === level) : state.students;
+  if (className) scoped = scoped.filter(s => (s.className || '未分班') === className);
+  const list = scoped.filter(s => getCareerGoal(s) === goal);
+  if (!list.length) { showToast('当前名单为空，无需导出', 'error'); return; }
+  const rows = list.map((s, i) => {
+    const gi = getCareerGoalInfo(s);
+    return {
+      '序号': i + 1, '姓名': s.name || '', '学号': s.studentId || '',
+      '专业': s.major || '', '班级': s.className || '',
+      '学历层次': normalizeCareerLevel(s.gradeLevel) || s.gradeLevel || '',
+      '生涯规划目标(原文)': String(s.careerGoal || '').trim() || '—',
+      '生效归类': gi.goal, '归类来源': gi.manual ? '手动指定' : `自动(${gi.auto})`
+    };
+  });
+  const scope = [level || '全部层次', className, goal].filter(Boolean).join('_');
+  exportToExcel(rows, `生涯名单_${scope}_${formatDate(new Date())}.xlsx`, '学生名单');
+  showToast(`已导出「${goal}」名单 ${list.length} 人`, 'success');
+}
+
+// 本地智能分析：基于当前范围统计数据生成诊断结论（纯前端，不联网、不含学生隐私）
+function generateCareerInsights(level) {
+  const st = computeCareerStats(level);
+  const total = st.total;
+  const sections = [];
+  if (!total) return [{ title: '暂无数据', items: ['当前范围没有学生数据，请先导入学生信息后再进行分析。'] }];
+  const pct = n => (n / total * 100).toFixed(1) + '%';
+  const sorted = CAREER_GOALS.map(g => ({ g, n: st.goals[g] })).sort((a, b) => b.n - a.n);
+  const top = sorted[0], second = sorted.find(x => x.n > 0 && x.g !== top.g);
+
+  // 1. 总体结构
+  const struct = [`当前范围共 <b>${total}</b> 人，主导方向为「<b>${top.g}</b>」${top.n} 人（${pct(top.n)}）`];
+  if (second) struct.push(`其次是「${second.g}」${second.n} 人（${pct(second.n)}）`);
+  const top3 = sorted.slice(0, 3).reduce((a, x) => a + x.n, 0);
+  struct.push(`前三类方向合计 ${top3} 人，占 ${pct(top3)}，${top3 / total >= 0.8 ? '方向较为集中，可针对性开展分类指导' : '方向较为分散，建议分层分类施策'}`);
+  sections.push({ title: '整体结构', items: struct });
+
+  // 2. 学历层次特点
+  const lv = careerLevelStats().filter(x => x.count > 0);
+  if (lv.length) {
+    const lvItems = lv.map(x => {
+      const lvTop = CAREER_GOALS.slice().sort((a, b) => x.goals[b] - x.goals[a])[0];
+      const lvTopN = x.goals[lvTop];
+      return `「${x.level}」${x.count} 人，以「${lvTop}」为主（${lvTopN} 人，占 ${(lvTopN / x.count * 100).toFixed(1)}%）`;
+    });
+    if (lv.length > 1) {
+      const primaries = lv.map(x => CAREER_GOALS.slice().sort((a, b) => x.goals[b] - x.goals[a])[0]);
+      lvItems.push(new Set(primaries).size > 1 ? '不同学历层次主导方向存在差异，建议按层次分别设计辅导内容' : '各学历层次主导方向一致，可统一开展主题活动');
+    }
+    sections.push({ title: '学历层次特点', items: lvItems });
+  }
+
+  // 3. 班级差异
+  const cls = Object.keys(st.classGoals).map(cn => {
+    const g = st.classGoals[cn];
+    const sum = CAREER_GOALS.reduce((a, k) => a + g[k], 0);
+    return { cn, g, sum, kaoyan: g['考研'], rate: sum ? g['考研'] / sum * 100 : 0, undecided: g['暂未规划'] };
+  }).filter(x => x.sum > 0);
+  let hi = null, lo = null;
+  if (cls.length > 1) {
+    const byRate = cls.slice().sort((a, b) => b.rate - a.rate);
+    hi = byRate[0]; lo = byRate[byRate.length - 1];
+    const clsItems = [
+      `考研意向最高：${escapeHtml(hi.cn)}（${hi.rate.toFixed(1)}%，${hi.kaoyan}/${hi.sum} 人）`,
+      `考研意向最低：${escapeHtml(lo.cn)}（${lo.rate.toFixed(1)}%，${lo.kaoyan}/${lo.sum} 人）`,
+      `班级间考研意向差距 ${(hi.rate - lo.rate).toFixed(1)} 个百分点，${hi.rate - lo.rate > 30 ? '差异显著，建议关注低比例班级的升学动员' : '差异处于正常范围'}`
+    ];
+    sections.push({ title: '班级差异', items: clsItems });
+  }
+
+  // 4. 重点关注（不含任何姓名学号）
+  const undecided = st.goals['暂未规划'] || 0;
+  const other = st.goals['其他'] || 0;
+  const focus = [];
+  if (undecided > 0) focus.push(`「暂未规划」${undecided} 人（${pct(undecided)}）${undecided / total >= 0.15 ? '，比例偏高，建议尽快开展一对一生涯谈话' : '，建议纳入常规跟踪'}`);
+  if (other > 0) focus.push(`「其他」${other} 人（${pct(other)}），多为详细记录未自动识别，可在名单中用「归类」下拉人工确认`);
+  if (!focus.length) focus.push('各类目标均已明确归类，暂无需特别关注的结构性风险。');
+  sections.push({ title: '重点关注', items: focus });
+
+  // 5. 工作建议
+  const advice = [];
+  advice.push(`针对占比最高的「${top.g}」群体，组织专题分享会，邀请高年级学长学姐传授经验`);
+  if (undecided / total >= 0.1) advice.push('对「暂未规划」学生分批次开展生涯访谈，帮助学生明确方向并记录谈话要点');
+  if (other > 0) advice.push('用名单中的归类下拉逐条核实「其他」类记录，提升数据准确性');
+  if (cls.length > 1 && hi && hi.rate - lo.rate > 30) advice.push(`推广 ${escapeHtml(hi.cn)} 的升学指导经验，对 ${escapeHtml(lo.cn)} 开展针对性动员`);
+  advice.push('定期导出统计表留存，对比不同时间点的结构变化，观察引导成效');
+  sections.push({ title: '工作建议', items: advice });
+
+  return sections;
+}
+
+// 生成脱敏统计摘要（绝不含姓名/学号/手机等个人隐私，可安全粘贴到外部 AI）
+function generateCareerDigest() {
+  const st = computeCareerStats('');
+  const lines = [];
+  lines.push('【生涯规划数据统计摘要 · 已脱敏，不含姓名学号等个人信息】');
+  lines.push(`统计学生总数：${st.total} 人`);
+  lines.push('');
+  lines.push('一、总体目标分布');
+  CAREER_GOALS.forEach(g => lines.push(`  - ${g}：${st.goals[g]} 人（${st.total ? (st.goals[g] / st.total * 100).toFixed(1) : '0.0'}%）`));
+  lines.push('');
+  lines.push('二、各班级目标分布（班级名仅为群体标识）');
+  Object.keys(st.classGoals).sort().forEach(cn => {
+    const g = st.classGoals[cn];
+    const sum = CAREER_GOALS.reduce((a, k) => a + g[k], 0);
+    lines.push(`  - ${cn}（${sum}人）：${CAREER_GOALS.map(k => k + g[k]).join('、')}`);
+  });
+  lines.push('');
+  lines.push('三、各学历层次目标分布');
+  careerLevelStats().forEach(x => {
+    lines.push(`  - ${x.level}（${x.count}人）：${CAREER_GOALS.map(g => g + x.goals[g]).join('、')}`);
+  });
+  lines.push('');
+  lines.push('请基于以上脱敏数据，从结构特点、班级差异、学历层次差异、潜在风险和工作建议五个方面进行分析，给出辅导员可落地的干预建议。');
+  return lines.join('\n');
+}
+
+// 复制脱敏摘要到剪贴板（含降级方案）
+async function copyCareerDigest() {
+  const text = generateCareerDigest();
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(text);
+    } else {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed'; ta.style.opacity = '0';
+      document.body.appendChild(ta); ta.select();
+      const ok = document.execCommand('copy');
+      document.body.removeChild(ta);
+      if (!ok) throw new Error('copy failed');
+    }
+    showToast('脱敏摘要已复制，可粘贴到外部 AI 工具分析', 'success');
+  } catch (e) {
+    showToast('复制失败，请检查浏览器剪贴板权限', 'error');
+  }
+}
+
+// 刷新 AI 分析卡片内容（切换学历层次后同步更新）
+function refreshCareerAI() {
+  const box = document.getElementById('careerAIBox');
+  if (!box) return;
+  const sections = generateCareerInsights(state.careerLevel || '');
+  box.innerHTML = sections.map(sec => `
+    <div class="ai-insight-sec">
+      <div class="ai-insight-title">${escapeHtml(sec.title)}</div>
+      <ul class="ai-insight-list">${sec.items.map(it => `<li>${it}</li>`).join('')}</ul>
+    </div>`).join('');
 }
 
 // ---------- 竞赛指导 ----------
